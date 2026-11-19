@@ -1,0 +1,628 @@
+{
+  "version": 0,
+  "hubs": [
+    {
+      "id": "H_METRO",
+      "name": "Ga Metro",
+      "location": {
+        "lat": 10.8758,
+        "lng": 106.8042
+      },
+      "powerLimitKW": 3,
+      "lastSeenAt": 0
+    },
+    {
+      "id": "H_KTX",
+      "name": "Ký túc xá",
+      "location": {
+        "lat": 10.8786,
+        "lng": 106.8031
+      },
+      "powerLimitKW": 3,
+      "lastSeenAt": 0
+    },
+    {
+      "id": "H_BK",
+      "name": "Bách Khoa",
+      "location": {
+        "lat": 10.8803,
+        "lng": 106.8053
+      },
+      "powerLimitKW": 3,
+      "lastSeenAt": 0
+    }
+  ],
+  "vehicles": [
+    {
+      "id": "EV-01",
+      "type": "Xe đạp điện",
+      "hubId": "H_METRO",
+      "slotId": "H_METRO-S01",
+      "batteryPercent": 90,
+      "observedAt": 0,
+      "sequence": 0,
+      "healthStatus": "OK",
+      "mobilityStatus": "Available",
+      "allocationOwner": null,
+      "connectorType": "TYPE2",
+      "capacityKWh": 4,
+      "version": 1
+    },
+    {
+      "id": "EV-02",
+      "type": "Xe máy điện",
+      "hubId": "H_METRO",
+      "slotId": "H_METRO-S02",
+      "batteryPercent": 65,
+      "observedAt": 0,
+      "sequence": 0,
+      "healthStatus": "OK",
+      "mobilityStatus": "Available",
+      "allocationOwner": null,
+      "connectorType": "TYPE2",
+      "capacityKWh": 4,
+      "version": 1
+    },
+    {
+      "id": "EV-03",
+      "type": "Xe đạp điện",
+      "hubId": "H_METRO",
+      "slotId": "H_METRO-S03",
+      "batteryPercent": 25,
+      "observedAt": 0,
+      "sequence": 0,
+      "healthStatus": "OK",
+      "mobilityStatus": "Available",
+      "allocationOwner": null,
+      "connectorType": "TYPE2",
+      "capacityKWh": 4,
+      "version": 1
+    },
+    {
+      "id": "EV-04",
+      "type": "Xe máy điện",
+      "hubId": "H_METRO",
+      "slotId": "H_METRO-S04",
+      "batteryPercent": 15,
+      "observedAt": 0,
+      "sequence": 0,
+      "healthStatus": "OK",
+      "mobilityStatus": "NeedsCharge",
+      "allocationOwner": null,
+      "connectorType": "TYPE2",
+      "capacityKWh": 4,
+      "version": 1
+    },
+    {
+      "id": "EV-05",
+      "type": "Xe đạp điện",
+      "hubId": "H_METRO",
+      "slotId": "H_METRO-S05",
+      "batteryPercent": 90,
+      "observedAt": 0,
+      "sequence": 0,
+      "healthStatus": "OK",
+      "mobilityStatus": "Available",
+      "allocationOwner": null,
+      "connectorType": "TYPE2",
+      "capacityKWh": 4,
+      "version": 1
+    },
+    {
+      "id": "EV-06",
+      "type": "Xe máy điện",
+      "hubId": "H_METRO",
+      "slotId": "H_METRO-S06",
+      "batteryPercent": 65,
+      "observedAt": 0,
+      "sequence": 0,
+      "healthStatus": "OK",
+      "mobilityStatus": "Available",
+      "allocationOwner": null,
+      "connectorType": "TYPE2",
+      "capacityKWh": 4,
+      "version": 1
+    },
+    {
+      "id": "EV-07",
+      "type": "Xe đạp điện",
+      "hubId": "H_KTX",
+      "slotId": "H_KTX-S01",
+      "batteryPercent": 90,
+      "observedAt": 0,
+      "sequence": 0,
+      "healthStatus": "OK",
+      "mobilityStatus": "Available",
+      "allocationOwner": null,
+      "connectorType": "TYPE2",
+      "capacityKWh": 4,
+      "version": 1
+    },
+    {
+      "id": "EV-08",
+      "type": "Xe máy điện",
+      "hubId": "H_KTX",
+      "slotId": "H_KTX-S02",
+      "batteryPercent": 65,
+      "observedAt": 0,
+      "sequence": 0,
+      "healthStatus": "OK",
+      "mobilityStatus": "Available",
+      "allocationOwner": null,
+      "connectorType": "TYPE2",
+      "capacityKWh": 4,
+      "version": 1
+    },
+    {
+      "id": "EV-09",
+      "type": "Xe đạp điện",
+      "hubId": "H_KTX",
+      "slotId": "H_KTX-S03",
+      "batteryPercent": 25,
+      "observedAt": 0,
+      "sequence": 0,
+      "healthStatus": "OK",
+      "mobilityStatus": "Available",
+      "allocationOwner": null,
+      "connectorType": "TYPE2",
+      "capacityKWh": 4,
+      "version": 1
+    },
+    {
+      "id": "EV-10",
+      "type": "Xe máy điện",
+      "hubId": "H_KTX",
+      "slotId": "H_KTX-S04",
+      "batteryPercent": 15,
+      "observedAt": 0,
+      "sequence": 0,
+      "healthStatus": "OK",
+      "mobilityStatus": "NeedsCharge",
+      "allocationOwner": null,
+      "connectorType": "TYPE2",
+      "capacityKWh": 4,
+      "version": 1
+    },
+    {
+      "id": "EV-11",
+      "type": "Xe đạp điện",
+      "hubId": "H_BK",
+      "slotId": "H_BK-S01",
+      "batteryPercent": 90,
+      "observedAt": 0,
+      "sequence": 0,
+      "healthStatus": "OK",
+      "mobilityStatus": "Available",
+      "allocationOwner": null,
+      "connectorType": "TYPE2",
+      "capacityKWh": 4,
+      "version": 1
+    },
+    {
+      "id": "EV-12",
+      "type": "Xe máy điện",
+      "hubId": "H_BK",
+      "slotId": "H_BK-S02",
+      "batteryPercent": 65,
+      "observedAt": 0,
+      "sequence": 0,
+      "healthStatus": "OK",
+      "mobilityStatus": "Available",
+      "allocationOwner": null,
+      "connectorType": "TYPE2",
+      "capacityKWh": 4,
+      "version": 1
+    }
+  ],
+  "slots": [
+    {
+      "id": "H_METRO-S01",
+      "hubId": "H_METRO",
+      "type": "SHARED",
+      "vehicleId": "EV-01",
+      "blocked": false
+    },
+    {
+      "id": "H_METRO-S02",
+      "hubId": "H_METRO",
+      "type": "SHARED",
+      "vehicleId": "EV-02",
+      "blocked": false
+    },
+    {
+      "id": "H_METRO-S03",
+      "hubId": "H_METRO",
+      "type": "SHARED",
+      "vehicleId": "EV-03",
+      "blocked": false
+    },
+    {
+      "id": "H_METRO-S04",
+      "hubId": "H_METRO",
+      "type": "SHARED",
+      "vehicleId": "EV-04",
+      "blocked": false
+    },
+    {
+      "id": "H_METRO-S05",
+      "hubId": "H_METRO",
+      "type": "SHARED",
+      "vehicleId": "EV-05",
+      "blocked": false
+    },
+    {
+      "id": "H_METRO-S06",
+      "hubId": "H_METRO",
+      "type": "SHARED",
+      "vehicleId": "EV-06",
+      "blocked": false
+    },
+    {
+      "id": "H_METRO-S07",
+      "hubId": "H_METRO",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_METRO-S08",
+      "hubId": "H_METRO",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_METRO-S09",
+      "hubId": "H_METRO",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_METRO-S10",
+      "hubId": "H_METRO",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_METRO-S11",
+      "hubId": "H_METRO",
+      "type": "PRIVATE",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_METRO-S12",
+      "hubId": "H_METRO",
+      "type": "PRIVATE",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_METRO-S13",
+      "hubId": "H_METRO",
+      "type": "PRIVATE",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_METRO-S14",
+      "hubId": "H_METRO",
+      "type": "PRIVATE",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_METRO-S15",
+      "hubId": "H_METRO",
+      "type": "PRIVATE",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_KTX-S01",
+      "hubId": "H_KTX",
+      "type": "SHARED",
+      "vehicleId": "EV-07",
+      "blocked": false
+    },
+    {
+      "id": "H_KTX-S02",
+      "hubId": "H_KTX",
+      "type": "SHARED",
+      "vehicleId": "EV-08",
+      "blocked": false
+    },
+    {
+      "id": "H_KTX-S03",
+      "hubId": "H_KTX",
+      "type": "SHARED",
+      "vehicleId": "EV-09",
+      "blocked": false
+    },
+    {
+      "id": "H_KTX-S04",
+      "hubId": "H_KTX",
+      "type": "SHARED",
+      "vehicleId": "EV-10",
+      "blocked": false
+    },
+    {
+      "id": "H_KTX-S05",
+      "hubId": "H_KTX",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_KTX-S06",
+      "hubId": "H_KTX",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_KTX-S07",
+      "hubId": "H_KTX",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_KTX-S08",
+      "hubId": "H_KTX",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_KTX-S09",
+      "hubId": "H_KTX",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_KTX-S10",
+      "hubId": "H_KTX",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_KTX-S11",
+      "hubId": "H_KTX",
+      "type": "PRIVATE",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_KTX-S12",
+      "hubId": "H_KTX",
+      "type": "PRIVATE",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_KTX-S13",
+      "hubId": "H_KTX",
+      "type": "PRIVATE",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_KTX-S14",
+      "hubId": "H_KTX",
+      "type": "PRIVATE",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_KTX-S15",
+      "hubId": "H_KTX",
+      "type": "PRIVATE",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_BK-S01",
+      "hubId": "H_BK",
+      "type": "SHARED",
+      "vehicleId": "EV-11",
+      "blocked": false
+    },
+    {
+      "id": "H_BK-S02",
+      "hubId": "H_BK",
+      "type": "SHARED",
+      "vehicleId": "EV-12",
+      "blocked": false
+    },
+    {
+      "id": "H_BK-S03",
+      "hubId": "H_BK",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_BK-S04",
+      "hubId": "H_BK",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_BK-S05",
+      "hubId": "H_BK",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_BK-S06",
+      "hubId": "H_BK",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_BK-S07",
+      "hubId": "H_BK",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_BK-S08",
+      "hubId": "H_BK",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_BK-S09",
+      "hubId": "H_BK",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_BK-S10",
+      "hubId": "H_BK",
+      "type": "SHARED",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_BK-S11",
+      "hubId": "H_BK",
+      "type": "PRIVATE",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_BK-S12",
+      "hubId": "H_BK",
+      "type": "PRIVATE",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_BK-S13",
+      "hubId": "H_BK",
+      "type": "PRIVATE",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_BK-S14",
+      "hubId": "H_BK",
+      "type": "PRIVATE",
+      "vehicleId": null,
+      "blocked": false
+    },
+    {
+      "id": "H_BK-S15",
+      "hubId": "H_BK",
+      "type": "PRIVATE",
+      "vehicleId": null,
+      "blocked": false
+    }
+  ],
+  "points": [
+    {
+      "id": "H_METRO-C1",
+      "hubId": "H_METRO",
+      "connectorType": "TYPE2",
+      "ratedKW": 2,
+      "blocked": false,
+      "pluggedVehicleId": null,
+      "powered": false
+    },
+    {
+      "id": "H_METRO-C2",
+      "hubId": "H_METRO",
+      "connectorType": "TYPE2",
+      "ratedKW": 2,
+      "blocked": false,
+      "pluggedVehicleId": null,
+      "powered": false
+    },
+    {
+      "id": "H_KTX-C1",
+      "hubId": "H_KTX",
+      "connectorType": "TYPE2",
+      "ratedKW": 2,
+      "blocked": false,
+      "pluggedVehicleId": null,
+      "powered": false
+    },
+    {
+      "id": "H_KTX-C2",
+      "hubId": "H_KTX",
+      "connectorType": "TYPE2",
+      "ratedKW": 2,
+      "blocked": false,
+      "pluggedVehicleId": null,
+      "powered": false
+    },
+    {
+      "id": "H_BK-C1",
+      "hubId": "H_BK",
+      "connectorType": "TYPE2",
+      "ratedKW": 2,
+      "blocked": false,
+      "pluggedVehicleId": null,
+      "powered": false
+    },
+    {
+      "id": "H_BK-C2",
+      "hubId": "H_BK",
+      "connectorType": "TYPE2",
+      "ratedKW": 2,
+      "blocked": false,
+      "pluggedVehicleId": null,
+      "powered": false
+    }
+  ],
+  "holds": [],
+  "privateVehicles": [
+    {
+      "id": "PV_A",
+      "userId": "STUDENT_A",
+      "plate": "59-EA 000.01",
+      "capacityKWh": 4,
+      "connectorType": "TYPE2"
+    },
+    {
+      "id": "PV_B",
+      "userId": "STUDENT_B",
+      "plate": "59-EB 000.02",
+      "capacityKWh": 4,
+      "connectorType": "TYPE2"
+    }
+  ],
+  "reservations": [],
+  "trips": [],
+  "invoices": [],
+  "chargingRequests": [],
+  "bookings": [],
+  "sessions": [],
+  "alerts": [],
+  "incidents": [],
+  "orders": [],
+  "plans": [],
+  "scenarios": [],
+  "runs": [],
+  "commands": [],
+  "notifications": [],
+  "activity": [],
+  "idempotency": {},
+  "demo": {
+    "autoAck": true,
+    "pausedHubs": [],
+    "physicalEvidence": {}
+  }
+}

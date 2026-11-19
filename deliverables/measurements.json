@@ -1,0 +1,24 @@
+{
+  "node": "v24.18.0",
+  "os": "win32 10.0.22621",
+  "cpu": "AMD Ryzen 7 7840H w/ Radeon 780M Graphics      ",
+  "memoryGiB": 15.2,
+  "Q03": {
+    "sample": 120,
+    "pattern": "sequential HTTP reads after one warmup per route",
+    "routes": [
+      "/api/hubs",
+      "/api/vehicles",
+      "/api/operator/overview",
+      "/api/operator/alerts"
+    ],
+    "p95Ms": 16,
+    "maxMs": 28.9
+  },
+  "Q04": {
+    "hubCount": 3,
+    "horizonMinutes": 360,
+    "elapsedMs": 179.9,
+    "pattern": "HTTP enqueue to first Completed status observed"
+  }
+}

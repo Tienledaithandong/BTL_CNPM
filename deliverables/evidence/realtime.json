@@ -1,0 +1,11 @@
+{
+  "samplesMs": [
+    239.9,
+    223,
+    243.5,
+    214.1,
+    210.7
+  ],
+  "maxMs": 243.5,
+  "metric": "HTTP request start to displayed text (conservative upper bound of commit to render)"
+}

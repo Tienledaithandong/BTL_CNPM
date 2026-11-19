@@ -1,0 +1,13 @@
+/node_modules/
+/dist/
+/data/
+/playwright-report/
+/test-results/
+/.pptx-build/
+/.pptx-validated/
+~$*
+*.log
+*.tmp
+.env
+.env.*
+!.env.example

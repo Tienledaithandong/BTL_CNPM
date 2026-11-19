@@ -1,0 +1,102 @@
+{
+  "apiTests": 23,
+  "browserTests": 7,
+  "screens": [
+    {
+      "title": "Tìm xe và đặt lượt",
+      "entries": [
+        {
+          "file": "01-student-hubs.png",
+          "caption": "Sinh viên xem Hub, pin và trạng thái xe. EV-02 có thể đặt khi đủ điều kiện."
+        },
+        {
+          "file": "02-student-reservation.png",
+          "caption": "Đặt EV-02 thành công. Hệ thống giữ xe và chỗ đích tại Ký túc xá, cấp mã nhận xe."
+        }
+      ]
+    },
+    {
+      "title": "Nhận xe, đổi đích và trả xe",
+      "entries": [
+        {
+          "file": "03-student-awaiting-ack.png",
+          "caption": "Lệnh mở khóa đang chờ ACK. Lượt đặt và chỗ đích vẫn được giữ."
+        },
+        {
+          "file": "04-student-active-trip.png",
+          "caption": "Operator gửi ACK hợp lệ. Chuyến đi đã mở và Sinh viên đổi đích sang Bách Khoa."
+        }
+      ]
+    },
+    {
+      "title": "Hóa đơn và sạc xe dùng chung",
+      "entries": [
+        {
+          "file": "05-student-invoice.png",
+          "caption": "Trả xe tại đích. Một hóa đơn demo được lưu và chuyến đi đã kết thúc."
+        },
+        {
+          "file": "06-student-shared-charging.png",
+          "caption": "Yêu cầu sạc của chính xe vừa trả. Trạng thái Đang sạc xuất hiện sau ACK cấp điện."
+        }
+      ]
+    },
+    {
+      "title": "Đỗ và sạc xe cá nhân",
+      "entries": [
+        {
+          "file": "07-student-private-parking.png",
+          "caption": "Student xác nhận lượt đỗ của PV_A tại Ga Metro."
+        },
+        {
+          "file": "08-student-private-charging.png",
+          "caption": "Lượt đỗ được dùng để lên lịch sạc, với phép tính 2 kWh trong 60 phút."
+        }
+      ]
+    },
+    {
+      "title": "Giám sát, cảnh báo và sự cố",
+      "entries": [
+        {
+          "file": "09b-operator-parking-alert.png",
+          "caption": "Fixture chiếm dụng 14/15 chỗ mở cảnh báo. Operator tiếp nhận rồi giảm chiếm dụng để kiểm luồng đóng."
+        },
+        {
+          "file": "11-operator-incident.png",
+          "caption": "Operator cô lập cổng sạc và kiểm trạng thái. Ca trình duyệt cũng xác nhận khôi phục."
+        }
+      ]
+    },
+    {
+      "title": "Điều phối và lập lịch sạc",
+      "entries": [
+        {
+          "file": "10-operator-redistribution.png",
+          "caption": "Lệnh điều phối đã đi qua xác nhận, xuất phát, đến và hoàn tất."
+        },
+        {
+          "file": "13-operator-charging-plan.png",
+          "caption": "Operator xem và áp dụng lịch sạc khả thi dưới giới hạn công suất của Hub."
+        }
+      ]
+    },
+    {
+      "title": "So sánh What-if",
+      "entries": [
+        {
+          "file": "12-operator-what-if.png",
+          "caption": "So sánh Cơ sở và Kịch bản, đọc chênh lệch trên snapshot độc lập. Kết quả được lưu theo lượt chạy."
+        }
+      ]
+    },
+    {
+      "title": "Khởi động lại",
+      "entries": [
+        {
+          "file": "14-restart-invoice.png",
+          "caption": "Sau khi tiến trình backend được khởi động lại, Student đăng nhập lại và xem đúng hóa đơn từ snapshot. Ca kiểm so lại ID và số tiền với kết quả trước khi dừng."
+        }
+      ]
+    }
+  ]
+}
