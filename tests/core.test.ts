@@ -219,3 +219,53 @@ test('UC06: unavailable return slot is repaired atomically or escalated without 
   assert.equal(e.store.snapshot().invoices.length,1);
   assert.equal(e.store.snapshot().vehicles[0].slotId,alternative.data);
 });
+
+test('A28: trip destination changes mid-trip; students report incidents on their trips', async (t) => {
+  const e=await environment(t);
+  const reserved=(await e.post(e.student,'/reservations',reservePayload)).json<{data:Reservation}>().data;
+  const picked=await e.post(e.student,'/reservations/'+reserved.id+'/pickup',{token:reserved.token,expectedVersion:reserved.version});
+  assert.equal(picked.statusCode,200,picked.body);
+  await e.tick();
+  await e.tick();
+  const {data:[trip]}=(await e.get(e.student,'/me/trips')).json<{data:(Trip&{hold:Hold})[]}>();
+  assert.equal(trip.endedAt,null);
+  assert.equal((await e.post(e.other,'/trips/'+trip.id+'/change-destination',{newHubId:'H_BK',expectedVersion:trip.version})).statusCode,403);
+  const changed=await e.post(e.student,'/trips/'+trip.id+'/change-destination',{newHubId:'H_BK',expectedVersion:trip.version});
+  assert.equal(changed.statusCode,200,changed.body);
+  const data=changed.json().data;
+  assert.equal(data.hold.hubId,'H_BK');
+  assert.equal(data.hold.status,'Held');
+  assert.equal(data.version,trip.version+1);
+  assert.equal((await e.get(e.student,'/me/trips')).json().data[0].hold.hubId,'H_BK');
+  assert.equal((await e.post(e.student,'/trips/'+trip.id+'/change-destination',{newHubId:'H_METRO',expectedVersion:trip.version})).statusCode,409);
+  const incident=await e.post(e.student,'/incidents',{resourceType:'vehicle',resourceId:trip.vehicleId,tripId:trip.id,description:'Kiểm tra bánh xe'});
+  assert.equal(incident.statusCode,200,incident.body);
+  assert.equal((await e.post(e.other,'/incidents',{resourceType:'vehicle',resourceId:trip.vehicleId,tripId:trip.id,description:'Mục tiêu khác'})).statusCode,403);
+});
+
+test('A29: student read routes for hubs/:id, private vehicles, invoices and notifications', async (t) => {
+  const e=await environment(t);
+  assert.deepEqual((await e.get(e.student,'/me/private-vehicles')).json().data.map((v:{id:string})=>v.id),['PV_A']);
+  assert.deepEqual((await e.get(e.other,'/me/private-vehicles')).json().data.map((v:{id:string})=>v.id),['PV_B']);
+  const metro=(await e.get(e.student,'/hubs/H_METRO')).json().data;
+  assert.equal(metro.id,'H_METRO');
+  assert.equal(metro.stale,false);
+  const first=(await e.post(e.student,'/reservations',reservePayload)).json<{data:Reservation}>().data;
+  assert.ok(first.id);
+  e.advance(15*60_000);
+  await e.tick();
+  assert.equal(e.store.snapshot().reservations[0].status,'Expired');
+  assert.ok((await e.get(e.student,'/me/notifications')).json().data.some((n:{message:string})=>n.message==='Lượt đặt xe đã hết hạn.'));
+  // Dữ liệu pin đã cũ sau advance — giả lập telemetry mới để đặt lại được.
+  assert.equal((await e.post(e.operator,'/operator/demo/events',{kind:'battery',vehicleId:'EV-01',batteryPercent:90})).statusCode,200);
+  const reserved=(await e.post(e.student,'/reservations',reservePayload)).json<{data:Reservation}>().data;
+  const picked=await e.post(e.student,'/reservations/'+reserved.id+'/pickup',{token:reserved.token,expectedVersion:reserved.version});
+  assert.equal(picked.statusCode,200,picked.body);
+  await e.tick();
+  await e.tick();
+  const {data:[trip]}=(await e.get(e.student,'/me/trips')).json<{data:(Trip&{hold:Hold})[]}>();
+  await e.post(e.operator,'/operator/demo/events',{kind:'returnEvidence',vehicleId:reserved.vehicleId,hubId:'H_KTX',slotId:trip.hold.slotId});
+  assert.equal((await e.post(e.student,'/trips/'+trip.id+'/return',{hubId:'H_KTX',expectedVersion:trip.version})).statusCode,200);
+  assert.equal((await e.get(e.student,'/me/invoices')).json().data.length,1);
+  assert.deepEqual((await e.get(e.student,'/me/charging-sessions')).json().data,[]);
+});

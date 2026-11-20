@@ -177,7 +177,7 @@ function parkingPreview(tx: Tx, input: Input) {
     const vehicleBooked = tx.state.bookings.some(b => b.vehicleId === vehicle.id
       && (b.status === 'Scheduled' || b.status === 'InUse') && overlaps(range.start, range.end, b.startAt, b.endAt));
     const slot = !vehicleBooked && range.end > tx.now && freshHub(tx.state, hubId, tx.now) && !parkingBlocked(tx.state, hubId)
-      ? tx.state.slots.find(s => s.hubId === hubId && s.type === 'PRIVATE' && canUseSlot(tx.state, s, range.start, range.end, undefined, range.start <= tx.now))
+      ? tx.state.slots.find(s => s.hubId === hubId && s.type === 'PRIVATE' && canUseSlot(tx.state, s, range.start, range.end, undefined, true))
       : undefined;
     return { startAt: range.start, endAt: range.end, slotId: slot?.id ?? null, available: !!slot,
       costVnd: Math.ceil((range.end - range.start) / (60 * MINUTE)) * 2_000,

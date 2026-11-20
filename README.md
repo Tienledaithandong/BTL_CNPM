@@ -60,6 +60,8 @@ npm.cmd run test:e2e
 npm.cmd exec -- tsx tools/measure.ts
 ```
 
+Lưu ý: `npm.cmd run test:e2e` tự chạy `npm run build` trước lần đầu (script `pretest:e2e`). Nếu muốn Playwright chạy trên Microsoft Edge, đặt biến `E2E_CHANNEL=msedge` trước khi chạy; mặc định là trình duyệt mặc định của Playwright. Xem [Kiến trúc & mô hình dữ liệu](docs/ARCHITECTURE.md).
+
 Playwright khởi động bản đã build trên cổng riêng và thư mục dữ liệu test riêng. Các phép đo ở [measurements.json](deliverables/measurements.json) dùng seed trên máy demo này. Xem [kết quả kiểm chứng](deliverables/Verification.md) để biết các tình huống được chạy và các mục còn mở.
 
 ## Quyết định triển khai
