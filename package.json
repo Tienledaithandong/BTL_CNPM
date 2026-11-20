@@ -12,6 +12,7 @@
     "build:web": "vite build",
     "start": "node dist/api/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "pretest:e2e": "npm run build",
     "test": "tsx --test tests/*.test.ts",
     "test:e2e": "playwright test",
     "dev:web": "vite"

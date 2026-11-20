@@ -217,6 +217,9 @@ test('UC15/16 HTTP: operator reads Completed outcome after worker, queued run be
   assert.equal(finished.finishedAt, now);
   assert.ok(finished.result);
   assert.equal(finished.input, undefined);
+  const listed = await system.app.inject({ method:'GET', url:'/api/operator/runs', headers });
+  assert.equal(listed.statusCode, 200, listed.body);
+  assert.ok(listed.json<{ data:Run[] }>().data.some(value => value.id === run.id));
   assert.deepEqual(operational(system.store.snapshot()), before);
   const next = await system.app.inject({ method:'POST', url:runRoute, headers, payload:{ expectedVersion:scenario.version } });
   assert.equal(next.statusCode, 200, next.body);
@@ -233,4 +236,38 @@ test('UC15/16 HTTP: operator reads Completed outcome after worker, queued run be
   assert.equal(reopened.statusCode, 200, reopened.body);
   assert.deepEqual(reopened.json<{data:Run}>().data, finished);
   assert.deepEqual(operational(system.store.snapshot()), before);
+});
+
+test('A32: charging plan preview rejects duplicate and unknown overrides', async t => {
+  const store = await fixture(t);
+  await store.write(operator, tx => { tx.state.sessions.push(waiting('WAIT-A','EV-03',25)); });
+  await assert.rejects(write(store, 'POST ' + plans + '/preview', { hubId:'H_METRO', overrides:['WAIT-A','WAIT-A'] }), isCode('INVALID_OVERRIDE'));
+  await assert.rejects(write(store, 'POST ' + plans + '/preview', { hubId:'H_METRO', overrides:['ghost'] }), isCode('INVALID_OVERRIDE'));
+  const proposal = await write<ChargingPlan>(store, 'POST ' + plans + '/preview', { hubId:'H_METRO', overrides:['WAIT-A'] });
+  assert.equal(proposal.assignments.length, 1);
+  assert.equal(proposal.assignments[0].sessionId, 'WAIT-A');
+});
+
+test('A33: scenario PATCH updates configuration and bumps version', async t => {
+  const store = await fixture(t);
+  const scenario = await write<Scenario>(store, 'POST ' + scenarios,
+    { name:'Nhu cầu metro', hubIds:['H_METRO','H_KTX'], durationMinutes:120, seed:42, tripDemandPct:40 });
+  const patched = await write<Scenario>(store, 'PATCH ' + scenarios + '/:id',
+    { id:scenario.id, version:scenario.version, name:'Nhu cầu hệ thống', tripDemandPct:100, chargingDemandPct:-20 });
+  assert.equal(patched.name, 'Nhu cầu hệ thống');
+  assert.equal(patched.config.tripDemandPct, 100);
+  assert.equal(patched.config.chargingDemandPct, -20);
+  assert.equal(patched.version, scenario.version + 1);
+});
+
+test('A35: charging plan energy follows the session estimate when telemetry lags', async t => {
+  const store = await fixture(t);
+  await store.write(operator, tx => {
+    tx.state.vehicles.find(v => v.id === 'EV-03')!.batteryPercent = 10;
+    tx.state.sessions.push(waiting('WAIT-A','EV-03',25));
+  });
+  const proposal = await write<ChargingPlan>(store, 'POST ' + plans + '/preview', { hubId:'H_METRO' });
+  assert.equal(proposal.assignments.length, 1);
+  const span = proposal.assignments[0].endAt - proposal.assignments[0].startAt;
+  assert.ok(span >= 66*60000 && span <= 68*60000, String(span));
 });

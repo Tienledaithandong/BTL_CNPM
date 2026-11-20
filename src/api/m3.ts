@@ -519,7 +519,8 @@ function createChargingPlan(tx: Tx, hubId: string, overrides: string[]): Version
       for (const point of ports) {
         const powerKW = Math.min(hub.powerLimitKW, point.ratedKW);
         if (!(powerKW > 0)) continue;
-        const energy = bounds.capacity * (session.targetPercent - Math.min(bounds.battery, session.currentPercent)) / 100;
+        // Cùng dạng với chargeEnergyAndDuration/canScheduleCharge — dùng mức pin của yêu cầu sạc.
+        const energy = bounds.capacity * (session.targetPercent - session.currentPercent) / 100;
         const endAt = startAt + Math.ceil(60 * energy / powerKW) * MINUTE;
         if (endAt <= startAt || endAt > bounds.to) continue;
         const candidate = { sessionId: session.id, pointId: point.id, startAt, endAt, powerKW, priority: rounded(priority) };
@@ -567,7 +568,7 @@ function registerChargingPlans(add: AddRoute) {
       if (!bounds || session.status !== 'Waiting' || plan.candidateVersions?.[session.id] !== session.version ||
           assignment.startAt < bounds.from || assignment.endAt > bounds.to)
         fail(409, 'PLAN_STALE', 'Yêu cầu hoặc cửa sổ sạc đã thay đổi, hãy xem trước lại.');
-      const minutes = Math.ceil(60 * bounds.capacity * (session.targetPercent - bounds.battery) / 100 / assignment.powerKW);
+      const minutes = Math.ceil(60 * bounds.capacity * (session.targetPercent - session.currentPercent) / 100 / assignment.powerKW);
       if (assignment.endAt - assignment.startAt < minutes * MINUTE)
         fail(409, 'PLAN_STALE', 'Mức pin đã thay đổi. Khung giờ hiện tại không đủ.');
     }

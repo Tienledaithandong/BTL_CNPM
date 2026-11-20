@@ -224,3 +224,45 @@ test('A04b: exactly one of 20 private parking requests can book the last compati
   const active = snapshot.holds.filter(h => h.status === 'Held' && h.slotId === booking.slotId);
   assert.deepEqual(active.map(h => h.id),[booking.holdId]);
 });
+
+test('A29: operator demo view and command table', async t => {
+  const { store, login } = await fixture(t);
+  const op = await login('OPERATOR_A');
+  const view = await op('GET','/operator/demo/events');
+  assert.equal(view.data.autoAck,true);
+  assert.deepEqual(view.data.pausedHubs,[]);
+  assert.equal(Array.isArray(view.data.commands),true);
+  await op('POST','/operator/demo/events',{kind:'autoAck',enabled:false});
+  assert.equal((await op('GET','/operator/demo/events')).data.autoAck,false);
+});
+
+test('A30: private parking booking expires — booking completes, hold releases', async t => {
+  const { store, login, setNow, tick } = await fixture(t);
+  const a = await login('STUDENT_A');
+  const booking = (await a('POST','/parking/bookings',parkingInput('PV_A',start+10*minute,start+100*minute))).data.bookings[0];
+  assert.equal((await a('GET','/me/parking-bookings')).data.length,1);
+  assert.equal(store.snapshot().holds.find(h => h.id === booking.holdId)?.status,'Held');
+  setNow(start+100*minute+1);
+  await tick();
+  assert.equal(store.snapshot().bookings.find(b => b.id === booking.id)?.status,'Completed');
+  assert.equal(store.snapshot().holds.find(h => h.id === booking.holdId)?.status,'Released');
+});
+
+test('A31: arrive while the vehicle is parked elsewhere — booking marks Delayed', async t => {
+  const { store, login } = await fixture(t);
+  const a = await login('STUDENT_A');
+  const booking = (await a('POST','/parking/bookings',parkingInput('PV_A',start,start+100*minute))).data.bookings[0];
+  let elsewhere: string|undefined;
+  await store.write({id:'OPERATOR_A',role:'OPERATOR'},(tx)=>{
+    const slot = tx.state.slots.find(s => s.hubId==='H_METRO' && s.type==='PRIVATE' && s.id!==booking.slotId)!;
+    elsewhere = slot.id;
+    slot.vehicleId = 'PV_A';
+  });
+  await a('POST','/parking/bookings/'+booking.id+'/arrive',{version:booking.version});
+  const row = store.snapshot().bookings.find(b => b.id === booking.id);
+  assert.equal(row?.status,'Scheduled');
+  assert.equal(row?.serviceStatus,'Delayed');
+  assert.equal(row?.guarantee,'NotGuaranteed');
+  assert.equal(store.snapshot().slots.find(s => s.id === booking.slotId)?.vehicleId,null);
+  assert.equal(store.snapshot().slots.find(s => s.id === elsewhere)?.vehicleId,'PV_A');
+});
