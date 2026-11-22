@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
+import { setImmediate } from 'node:timers/promises';
 
 import { allocateVehicle, confirmVehicleArrival, markVehicleInTransit, releaseVehicleHold } from './m1.js';
-import { applyChargingAssignments, arriveDestination, canScheduleCharge, releaseDestination, reserveDestination } from './m2.js';
+import { applyChargingAssignments, arriveDestination, canScheduleCharge, fitsPowerWindow, releaseDestination, reserveDestination } from './m2.js';
 import {
   checkVersion, entity, fail, fresh, number, requiredString,
   type AddRoute, type ChargingPlan, type Input, type Item, type Order, type PlanAssignment, type Run, type ScenarioConfig,
@@ -10,7 +11,7 @@ import {
 
 const MINUTE = 60_000;
 const TICK = 5 * MINUTE;
-const ENGINE_VERSION = '1';
+const ENGINE_VERSION = '2';
 
 export function chargingPriority(battery: number, neededAt: number | null, now: number) {
   const hours = neededAt === null ? null : Math.max(1 / 60, (neededAt - now) / (60 * MINUTE));
@@ -62,6 +63,20 @@ interface SimOutcome {
   affectedIds: string[];
   shortages: Record<string, { vehicles: number; slots: number; charging: number }>;
 }
+interface ChargeAlternative {
+  requestId: string;
+  pointId: string;
+  slotId: string;
+  startAt: number;
+  endAt: number;
+  powerKW: number;
+  energyKWh: number;
+}
+interface SimResult {
+  outcome: SimOutcome;
+  initialSlots: SimSlot[];
+  alternatives: Map<string, ChargeAlternative>;
+}
 const lexical = <T extends { id: string }>(left: T, right: T) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
 const byTime = <T extends { id: string; at: number }>(left: T, right: T) => left.at - right.at || lexical(left, right);
 const overlaps = (start: number, end: number, reservedStart: number, reservedEnd: number | null) =>
@@ -107,7 +122,26 @@ function scaleDemand<T extends { id: string }>(base: T[], percent: number, seed:
   return [...base, ...added];
 }
 
-function simulate(source: SimulationNetwork, hours: number, demands: Demands, config: SimulationConfig | null): SimOutcome {
+function findChargeWindow(hub: SimHub, req: ChargeDemand, ports: SimPort[], slots: SimSlot[],
+  commitments: SimCommitment[], startAt: number, limit: number): ChargeAlternative | undefined {
+  for (let start = startAt; start < limit; start += TICK) {
+    for (const port of ports) {
+      if (port.hubId !== hub.id || port.blocked || port.connector !== req.connector) continue;
+      const rated = Math.min(port.kw, hub.power);
+      for (const powerKW of new Set([rated, Math.min(rated, 1)])) {
+        if (powerKW <= 0) continue;
+        const end = start + Math.ceil(req.kwh / powerKW * 12) * TICK;
+        if (end > limit || commitments.some(item => item.portId === port.id && overlaps(start,end,item.start,item.end)) ||
+            !fitsPowerWindow(hub.power,start,end,powerKW,commitments)) continue;
+        const slot = slots.find(item => item.hubId === hub.id && item.kind === 'PRIVATE' && !item.blocked &&
+          item.occupiedBy === null && !commitments.some(c => c.slotId === item.id && overlaps(start,end,c.start,c.end)));
+        if (slot) return {requestId:req.id,pointId:port.id,slotId:slot.id,startAt:start,endAt:end,powerKW,energyKWh:rounded(req.kwh)};
+      }
+    }
+  }
+}
+
+function* simulate(source: SimulationNetwork, hours: number, demands: Demands, config: SimulationConfig | null): Generator<void,SimResult> {
   const network = structuredClone(source);
   const horizon = network.capturedAt + hours * 60 * MINUTE;
   const hubs = [...network.hubs].sort(lexical);
@@ -132,6 +166,7 @@ function simulate(source: SimulationNetwork, hours: number, demands: Demands, co
       if (overlaps(network.capturedAt, horizon, item.start, item.end) && (disabledSlot || disabledPort)) affectedIds.add(item.id);
     }
   }
+  const initialSlots = slots.map(slot => ({ ...slot }));
   const trips = [...demands.trips].sort(byTime);
   const charges = [...demands.charges].sort(byTime);
   const inbound: { at: number; vehicle: SimVehicle; slot: SimSlot }[] = [];
@@ -150,6 +185,7 @@ function simulate(source: SimulationNetwork, hours: number, demands: Demands, co
     !slot.blocked && slot.occupiedBy === null && !allocated.has(slot.id) &&
     !network.commitments.some(item => item.slotId === slot.id && overlaps(start, end, item.start, item.end));
   for (let now = network.capturedAt; now < horizon; now += TICK) {
+    yield;
     for (let index = inbound.length - 1; index >= 0; index--) {
       const arrival = inbound[index];
       if (arrival.at > now) continue;
@@ -202,13 +238,9 @@ function simulate(source: SimulationNetwork, hours: number, demands: Demands, co
         const commitments = network.commitments.filter(c => c.hubId === hub.id &&
           overlaps(now, end, c.start, c.end));
         if (commitments.some(c => c.portId === item.id)) return false;
-        // Every committed allocation boundary in the candidate window is a possible new peak.
-        const checkpoints = [now, ...commitments.map(c => c.start).filter(at => at > now && at < end)];
-        return checkpoints.every(at => {
-          const committed = commitments.reduce((kw, c) => kw + (overlaps(at, at + 1, c.start, c.end) ? (c.kw ?? 0) : 0), 0);
-          const charging = active.reduce((kw, charge) => kw + (charge.port.hubId === hub.id && at < charge.endsAt ? charge.port.kw : 0), 0);
-          return committed + charging + item.kw <= hub.power + 1e-8;
-        });
+        const inProgress = active.filter(charge => charge.port.hubId === hub.id)
+          .map(charge => ({start:now,end:charge.endsAt,kw:charge.port.kw}));
+        return fitsPowerWindow(hub.power,now,end,item.kw,[...commitments,...inProgress]);
       });
       if (!port) { index++; continue; }
       const endsAt = now + Math.ceil((request.kwh / port.kw) * 12) * TICK;
@@ -236,11 +268,27 @@ function simulate(source: SimulationNetwork, hours: number, demands: Demands, co
     waitingChargingMinutes += (horizon - request.at) / MINUTE;
     if (shortages[request.hubId]) shortages[request.hubId].charging++;
   }
-  return { metrics: { servedTrips, rejectedTrips: rejectedByReason.noVehicle + rejectedByReason.noSlot,
+  const alternatives = new Map<string, ChargeAlternative>();
+  if (config) {
+    const commitments = [...network.commitments, ...active.map(({demand,port,slot,endsAt}) => ({
+      id:demand.id,hubId:port.hubId,portId:port.id,slotId:slot.id,start:horizon,end:endsAt,kw:port.kw,
+    })).filter(item => item.end > horizon)];
+    const simulatedChargingSlots = new Set(active.map(charge => charge.slot.id));
+    const candidateSlots = slots.map(slot => simulatedChargingSlots.has(slot.id) ? {...slot,occupiedBy:null} : slot);
+    for (const hub of hubs) {
+      const request = queue.find(item => item.hubId === hub.id);
+      if (!request) continue;
+      yield;
+      const choice = findChargeWindow(hub,request,ports,candidateSlots,commitments.filter(item => item.hubId === hub.id),
+        horizon,horizon + 360 * MINUTE);
+      if (choice) alternatives.set(hub.id,choice);
+    }
+  }
+  return { initialSlots, alternatives, outcome:{ metrics: { servedTrips, rejectedTrips: rejectedByReason.noVehicle + rejectedByReason.noSlot,
     peakParkingOccupancy: peakParkingOccupancy === null ? null : rounded(peakParkingOccupancy),
     waitingChargingMinutes: rounded(waitingChargingMinutes), meanChargingWait: chargeIndex ? rounded(waitingChargingMinutes / chargeIndex) : null,
     waitingChargingCount: queue.length, energyDeliveredKWh: rounded(energyDeliveredKWh), affectedCount: affectedIds.size },
-    rejectedByReason, affectedIds: [...affectedIds].sort(), shortages };
+    rejectedByReason, affectedIds: [...affectedIds].sort(), shortages } };
 }
 
 function concentrateTrips(trips: TripDemand[], config: SimulationConfig, seed: string) {
@@ -260,10 +308,10 @@ function concentrateTrips(trips: TripDemand[], config: SimulationConfig, seed: s
   });
 }
 
-export function runWhatIf(network: SimulationNetwork, config: SimulationConfig, seed: string, fixture?: Demands) {
+function* whatIf(network: SimulationNetwork, config: SimulationConfig, seed: string, fixture?: Demands) {
   const demand = fixture ?? makeDemands(network, config.hours, seed);
-  const baseline = simulate(network, config.hours, demand, null);
-  const scenario = simulate(network, config.hours, { trips: concentrateTrips(scaleDemand(demand.trips, config.tripChangePct, seed), config, seed),
+  const {outcome:baseline} = yield* simulate(network, config.hours, demand, null);
+  const {outcome:scenario,initialSlots,alternatives} = yield* simulate(network, config.hours, { trips: concentrateTrips(scaleDemand(demand.trips, config.tripChangePct, seed), config, seed),
     charges: scaleDemand(demand.charges, config.chargingChangePct, seed) }, config);
   const delta: Record<keyof SimMetrics, number | null> = { ...baseline.metrics };
   for (const metric of Object.keys(delta) as (keyof SimMetrics)[]) {
@@ -271,9 +319,9 @@ export function runWhatIf(network: SimulationNetwork, config: SimulationConfig, 
     const right = scenario.metrics[metric];
     delta[metric] = left === null || right === null ? null : rounded(right - left);
   }
-  const recommendations: { hubId: string; operation: string; detail: string }[] = [];
+  const recommendations: { hubId: string; operation: string; detail: string; window?: ChargeAlternative }[] = [];
   const through = network.capturedAt + config.hours * 60 * MINUTE;
-  const room = (hubId: string) => network.slots.filter(slot => slot.hubId === hubId && slot.kind === 'SHARED' &&
+  const room = (hubId: string) => initialSlots.filter(slot => slot.hubId === hubId && slot.kind === 'SHARED' &&
     !slot.blocked && slot.occupiedBy === null && !network.commitments.some(c => c.slotId === slot.id &&
       overlaps(network.capturedAt, through, c.start, c.end))).length;
   for (const [hubId, short] of Object.entries(scenario.shortages)) {
@@ -293,15 +341,22 @@ export function runWhatIf(network: SimulationNetwork, config: SimulationConfig, 
         'Xem xét Hub ' + alternative.id + ' còn chỗ trong snapshot.' : 'Không tìm thấy Hub khác còn chỗ phù hợp trong snapshot.' });
     }
     if (short.charging > 0) {
-      recommendations.push({ hubId, operation: 'ChargingReview', detail: 'Có ' + short.charging +
-        ' yêu cầu còn chờ cuối kỳ. Chạy kiểm tra cửa sổ công suất ở màn hình lịch sạc trước khi chọn giờ khác.' });
+      const window = alternatives.get(hubId);
+      recommendations.push({ hubId, operation:window ? 'ChargingWindow' : 'NoFeasibleCharging', window,
+        detail:window ? 'Khung cho một yêu cầu còn chờ đã qua kiểm tra chỗ đỗ, đầu nối và công suất.' :
+          'Không tìm được khung đủ chỗ đỗ, cổng tương thích và công suất cho yêu cầu ưu tiên trong 6 giờ sau kỳ mô phỏng.' });
     }
   }
   return { engineVersion: ENGINE_VERSION, baseline, scenario, delta, recommendations, assumptions: {
     tickMinutes: TICK / MINUTE, tripMinutes: 15, tripBatteryDrop: 5, portRounding: 'nearest integer',
     rentDemandRounding: 'nearest integer', blockedSlotSelection: 'free slots first, then by ID within each group',
     concentration: 'changes trip destinations toward or away from the first selected hub',
-    operationalScope: 'selected hubs in a captured snapshot' } };
+    operationalScope: 'selected hubs in a captured snapshot', alternativeChargingHorizonHours: 6 } };
+}
+
+export function runWhatIf(network: SimulationNetwork, config: SimulationConfig, seed: string, fixture?: Demands) {
+  const steps = whatIf(network,config,seed,fixture);
+  for (let step = steps.next(); ; step = steps.next()) if (step.done) return step.value;
 }
 
 const ownerType = 'REDISTRIBUTION_ITEM';
@@ -642,10 +697,15 @@ function captureNetwork(state: State, config: ScenarioConfig, now: number): Simu
 
 interface SimulationInput { network: SimulationNetwork; config: SimulationConfig; seed: string }
 
-export function computeSimulation(run: Run): unknown {
+export async function computeSimulation(run: Run) {
   const input = run.input as SimulationInput | undefined;
   if (!input?.network || !input?.config || !input?.seed) throw new Error('Thiếu dữ liệu snapshot của lượt mô phỏng.');
-  return { ...runWhatIf(input.network, input.config, input.seed), snapshotVersion: run.snapshotVersion };
+  const steps = whatIf(input.network,input.config,input.seed);
+  for (let count = 0; ; count++) {
+    const step = steps.next();
+    if (step.done) return { ...step.value, snapshotVersion:run.snapshotVersion };
+    if (count % 8 === 0) await setImmediate();
+  }
 }
 
 function publicRun(run: Run) {
