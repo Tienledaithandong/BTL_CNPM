@@ -91,11 +91,14 @@ function ReservationCard({ reservation, hubs, refresh }: { reservation: Reservat
   return <Card title={`Lượt đặt · ${vehicleId}`} extra={<Badge value={reservation.status} />}>
     <dl className="details"><dt>Điểm trả</dt><dd>{hubName(hubs,hold?.hubId)} · {hold?.slotId ?? '—'}</dd><dt>Thời hạn</dt><dd><Expiry expiresAt={reservation.expiresAt} pending={pending} /></dd><dt>Mã nhận xe</dt><dd className="code-token">{reservation.token}</dd></dl>
     <Feedback feedback={action.feedback} />
-    {pending ? <p role="status" className="notice">Yêu cầu mở khóa đang được xác nhận. Lượt đặt và chỗ đỗ đích vẫn được giữ trong lúc đợi thiết bị.</p> :
+    {pending ? <p role="status" className="notice">{reservation.needsReconciliation
+      ? 'Chưa xác định kết quả mở khóa. Vui lòng liên hệ điều phối viên để đối soát. Xe và chỗ đỗ đích vẫn được giữ.'
+      : 'Yêu cầu mở khóa đang được xác nhận. Lượt đặt và chỗ đỗ đích vẫn được giữ trong lúc đợi thiết bị.'}</p> :
       <>
+        {reservation.pickupReason && <p role="status" className="notice">{reservation.pickupReason}</p>}
         <form className="stack" onSubmit={(event) => submit(event, () => { void pickup(); })}>
           <Field label="Nhập mã nhận xe"><input required value={token} onChange={(event) => setToken(event.target.value)} autoComplete="off" /></Field>
-          <div className="actions"><Button type="submit" tone="primary" disabled={action.busy || !token.trim()}>Nhận xe</Button><Button onClick={() => setToken(reservation.token)}>Điền mã nhận xe</Button></div>
+          <div className="actions"><Button type="submit" tone="primary" disabled={action.busy || !token.trim() || !reservation.canPickup}>Nhận xe</Button><Button onClick={() => setToken(reservation.token)}>Điền mã nhận xe</Button></div>
         </form>
         <form className="stack" onSubmit={(event) => submit(event, () => { void change(); })}>
           <HubField hubs={hubs} label="Đổi hub trả xe" exclude={hold?.hubId} value={destination} onChange={setDestination} />
@@ -306,10 +309,20 @@ export function StudentCharging({ revision, refresh }: PageProps) {
         </form>
         {relevantPreview && <div className="stack">
           <p className="notice">Dự kiến {relevantPreview.energyKWh} kWh trong {relevantPreview.durationMinutes} phút.</p>
+          {!relevantPreview.choices?.some(choice => choice.available) && <p className="notice" role="status">Khung này không có cổng và công suất phù hợp trong thời gian đỗ.</p>}
           {!!relevantPreview.choices?.length && <Field label="Cổng sạc"><select value={pointId} onChange={(event) => setPointId(event.target.value)}><option value="">Chọn tự động</option>{relevantPreview.choices.map((choice) => <option disabled={choice.available === false} value={choice.pointId} key={choice.pointId}>{choice.pointId}</option>)}</select></Field>}
           {!!relevantPreview.suggestions?.length && <div className="stack"><strong>Khung khác có thể dùng</strong>{relevantPreview.suggestions.map((choice,index) => <div className="row" key={index}><span>{choice.pointId} · <DateTime value={choice.startAt} /> · {choice.powerKW ?? '—'} kW</span>
-            {typeof choice.startAt === 'number' && <Button compact onClick={() => { setStart(new Date(choice.startAt! + 420 * 60000).toISOString().slice(0,16)); if (choice.powerKW) setPower(choice.powerKW); }}>Dùng khung này</Button>}</div>)}</div>}
-          <div><Button tone="primary" disabled={action.busy || !valid} onClick={() => { void confirm(); }}>Xác nhận lịch sạc</Button></div>
+            {choice.startAt !== undefined && choice.endAt !== undefined && choice.powerKW !== undefined && <Button compact onClick={() => {
+              const {startAt, endAt, powerKW} = choice;
+              if (startAt === undefined || endAt === undefined || powerKW === undefined) return;
+              const localStart = new Date(startAt + 420 * 60000).toISOString().slice(0,16);
+              setStart(localStart);
+              setPower(powerKW);
+              setPointId(choice.pointId);
+              setPreview({ key:JSON.stringify([bookingId,localStart,current,target,powerKW]),
+                data:{ energyKWh:relevantPreview.energyKWh, durationMinutes:(endAt-startAt)/60000, choices:[choice] } });
+            }}>Dùng khung này</Button>}</div>)}</div>}
+          <div><Button tone="primary" disabled={action.busy || !valid || !relevantPreview.choices?.some(choice => choice.available)} onClick={() => { void confirm(); }}>Xác nhận lịch sạc</Button></div>
         </div>}
       </Card>
     </div>
