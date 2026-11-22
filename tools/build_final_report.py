@@ -75,10 +75,23 @@ def summary_table(results, realtime):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--baseline", type=Path, default=BASELINE, help="Path to the group BTL3 PDF")
-    baseline = parser.parse_args().baseline
-    if not baseline.is_file():
-        parser.error("BTL3 PDF not found. Supply it with --baseline.")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--baseline", type=Path, help="Path to the group BTL3 PDF")
+    source.add_argument("--prior-final", type=Path, help="Use the BTL1–3 pages before the Submission 4 bookmark in a prior Final")
+    args = parser.parse_args()
+    baseline_path = args.prior_final or args.baseline or BASELINE
+    if not baseline_path.is_file():
+        parser.error("Supply a group BTL3 PDF or a prior merged Final.")
+    baseline = PdfReader(baseline_path)
+    baseline_pages = None
+    if args.prior_final:
+        supplement_pages = [
+            baseline.get_destination_page_number(item) for item in baseline.outline
+            if isinstance(item, dict) and item.get("/Title") == "Submission 4 - Bản chạy và minh chứng"
+        ]
+        if len(supplement_pages) != 1 or not 0 < supplement_pages[0] < len(baseline.pages):
+            parser.error("The prior Final must have exactly one valid Submission 4 bookmark.")
+        baseline_pages = (0, supplement_pages[0])
     measure = json.loads((OUTPUT / "measurements.json").read_text(encoding="utf-8"))
     realtime = json.loads((EVIDENCE / "realtime.json").read_text(encoding="utf-8"))
     state = json.loads((OUTPUT / "evidence.json").read_text(encoding="utf-8"))
@@ -87,11 +100,12 @@ def main():
         p("SUBMISSION 4  /  CÔNG NGHỆ PHẦN MỀM", "tag"),
         p("Smart E-Mobility Hub", "title"),
         p("Bản chạy MVP, chuỗi màn hình kiểm chứng và khai báo AI", "section"),
-        p("Phần phía trước là tài liệu thiết kế BTL1–BTL3 của nhóm. Phần này ghi các quyết định triển khai và kết quả chạy trên máy demo từ 18 đến 19/11/2026."),
+        p(f"Phần phía trước là tài liệu thiết kế BTL1–BTL3 của nhóm. Phần bổ sung ghi nhận bản kiểm chứng ngày {state['verifiedOn']}."),
         p("Kiến trúc bản chạy", "section"),
         p("React + TypeScript + Vite trên trình duyệt. Fastify + TypeScript chạy M1 (xe và chuyến đi), M2 (chỗ đỗ, sạc, vận hành), M3 (điều phối, lịch sạc và What-if) trong một tiến trình. REST truyền thao tác, WebSocket báo cập nhật để trình duyệt đọc lại dữ liệu đúng quyền. Giao dịch lưu snapshot trước khi công bố và phát lệnh."),
         p("Khác biệt với thiết kế trước", "section"),
         p("Đổi chỗ đích dùng cùng giao dịch. Kết quả mở khóa chưa xác định giữ nguyên chủ xe và chỗ đích. Chữ ký giữ chỗ điều phối dùng chủ item. Áp dụng lịch sạc trả danh sách ID phiên và trả lỗi riêng khi xung đột. Dữ liệu chưa có được biểu diễn nullable. App chạy với dữ liệu và phản hồi mô phỏng. Biểu giá chỉ minh họa."),
+        p("Snapshot phiên bản 2 lưu thời gian ISO UTC và đọc được bản cũ. Khi nạp backup, Operator xác nhận từng lệnh chờ. Phiên sạc riêng có thể chọn khung thay thế khi vượt công suất. What-if kiểm chỗ đỗ, cổng và công suất của khung đề xuất."),
         p("Kết quả kiểm chứng", "section"),
         p(f"{state['apiTests']} ca kiểm thử nghiệp vụ/API và {state['browserTests']} ca kiểm thử trình duyệt đã đạt. Chi tiết phạm vi từng ca nằm trong bảng Verification.md của bản mã nguồn."),
         summary_table(measure, realtime),
@@ -124,10 +138,12 @@ def main():
                           topMargin=55, bottomMargin=58, title="Smart E-Mobility Hub - Submission 4").build(
                               story, onFirstPage=footer, onLaterPages=footer)
         writer = PdfWriter()
-        writer.append(str(baseline))
+        writer.append(baseline, pages=baseline_pages)
         writer.append(str(supplement), outline_item="Submission 4 - Bản chạy và minh chứng")
         writer.add_metadata({"/Title": "Smart E-Mobility Hub - Submission 4", "/Subject": "CO3001 - Musketeers"})
-        writer.write(str(FINAL))
+        candidate = FINAL.with_suffix(".tmp")
+        writer.write(str(candidate))
+        candidate.replace(FINAL)
     with FINAL.open("rb") as file:
         print(f"{len(PdfReader(file).pages)} pages: {FINAL}")
 

@@ -1,42 +1,69 @@
-# Kiểm chứng MVP — Smart E-Mobility Hub
+# Kiểm chứng MVP Smart E-Mobility Hub
 
-Bản chạy cục bộ trên Windows, Node.js 24.18.0, Microsoft Edge, dữ liệu seed ba Hub. Bảng này ghi hành vi được kiểm bằng ca tự động trong `tests/` và phép đo theo seed. Đề bài và các kết quả cần xác nhận khi nhóm diễn tập trên máy nộp bài.
+Lần chạy ngày 23/11/2026 trên checkout dựa trên `dc1bb01` kèm các thay đổi trong workspace. Môi trường Windows, Node.js 24.15.0, npm 11.12.1, Microsoft Edge, Intel i5-1240P, RAM 15,7 GiB và bộ seed 3 Hub.
 
-Kết quả lần chạy bàn giao: build và typecheck đạt, 23 ca nghiệp vụ/API và 7 ca trình duyệt Edge đạt.
+Build và typecheck đạt. **35/35 ca nghiệp vụ/API và 9/9 ca Edge đạt.** Playwright dùng bản đã build và tự thu dọn tiến trình test trên Windows.
 
-## Truy vết nghiệp vụ
+```powershell
+npm.cmd ci
+npm.cmd test
+npm.cmd run build
+$env:E2E_CHANNEL = 'msedge'
+npm.cmd run test:e2e
+npm.cmd exec -- tsx tools/measure.ts
+```
 
-| Mục PRD | Hành vi có bằng chứng | Nguồn kiểm |
+## Nghiệm thu nghiệp vụ
+
+| ID | Bằng chứng tự động đã chạy | Nguồn |
 |---|---|---|
-| A01–A02 | Lỗi 401 và 403, Student B không đọc lượt đặt Student A và không thể hủy theo ID. Xe pin thấp bị từ chối. | `core.test.ts`, `realtime.spec.ts` |
-| A03–A05 | Hub đích hết chỗ không giữ xe. Lỗi đổi đích giữ hold cũ. 20 request tranh một xe hoặc slot riêng cuối cùng chỉ có một thành công mỗi ca. | `core.test.ts`, `m2.test.ts` |
-| A06–A08 | Hết hạn nhả tài nguyên. ACK chưa xác định giữ hold, ACK đến sau TTL vẫn tạo đúng một Trip. Chỗ nguồn nhả một lần. Sai Hub hay thiếu chứng cứ ở chế độ thủ công giữ Trip mở. Trả lặp một hóa đơn, chỗ hỏng được sửa trong cùng Hub hoặc ghi sự cố để Operator tiếp nhận. | `core.test.ts`, `flows.spec.ts` |
-| A09–A11 | Yêu cầu sạc lặp giữ một phiên. Cổng không tương thích và sai chủ bị từ chối. Có ca interval chạm biên, xung đột và skipConflicts. Fixture 4 kWh, 20–70%, 2 kW cho năng lượng 2 kWh trong 60 phút. | `m2.test.ts`, `flows.spec.ts` |
-| A12–A13 | Hai phiên 2 kW tranh giới hạn 3 kW. StopPending qua giờ kết thúc vẫn giữ điện, ACK dừng giữ đầu cắm cho tới khi rút. | `m2.test.ts`, `m3.test.ts` |
-| A14 | Ngưỡng 89→90→85→84% chạy trên fixture 100 slot qua REST. Demo 15 slot chạy mở tại 14/15, acknowledge và đóng tại 12/15. Kiểm dữ liệu stale theo heartbeat. | `m2.test.ts`, `flows.spec.ts` |
-| A15–A17 | Thiếu hold rollback cả lần confirm. Lệnh còn đang vận chuyển không hủy toàn bộ. Thay xe có reservation và giữ hold. Tác động lên item giữ nguyên departedAt và hold. Điểm sạc có luồng sự cố cô lập/khôi phục. | `m2.test.ts`, `m3.test.ts`, `flows.spec.ts` |
-| A18 | Kế hoạch không ghi đè tài nguyên khi preview. Heartbeat không liên quan không chặn apply. Thay đổi tài nguyên thật chặn áp dụng và giữ phân bổ cũ. | `m3.test.ts` |
-| A19–A21 | Kết quả tính xác định, kịch bản trung tính có delta 0. Fixture baseline 2 nhận/1 từ chối, kịch bản 1 nhận/2 từ chối. Run ghi kết quả, giữ nguyên tài nguyên live do engine và chuyển lượt gián đoạn thành Failed sau restart. | `m3.test.ts`, `flows.spec.ts` |
-| A22–A25 | Lỗi ghi trước commit, kết quả replace bất định, backup Recovery, cả hai bản hỏng, lệnh giữ ID qua restart, retry và xung đột idempotency. | `core.test.ts` |
-| A26 | WS thiếu phiên bị từ chối. Thay đổi chỉ gửi thông báo phiên bản chung. Kết nối lại nhận phiên bản hiện tại và GET hội tụ, vẫn kiểm quyền sở hữu. | `core.test.ts`, `realtime.spec.ts` |
+| A01 | Vai trò sai nhận 403, thiếu phiên nhận 401, Student B không đọc hoặc hủy lượt đặt của A. | `core.test.ts` |
+| A02 | Gói telemetry cũ/trùng bị bỏ qua có lý do. Xe quá 60 giây hoặc bị lỗi có lý do trong read model. REST từ chối đặt và nhận khi telemetry stale. Browser hiển thị lý do và chặn xe pin thấp. | `core.test.ts`, `realtime.spec.ts` |
+| A03 | Hub đích đầy, xe và hold không được cấp. | `core.test.ts` |
+| A04 | Mỗi nhóm 20 yêu cầu tranh đúng một xe hoặc đúng một slot riêng có một yêu cầu thành công. | `core.test.ts`, `m2.test.ts` |
+| A05 | Đổi sang Hub đầy giữ hold cũ. | `core.test.ts` |
+| A06 | Hết hạn nhả xe và hold. Lệnh UnlockPending giữ tài nguyên đến khi có kết quả. | `core.test.ts` |
+| A07 | ACK muộn và ACK lặp chỉ tạo một Trip. Hold chuyển đúng chủ. | `core.test.ts`, `flows.spec.ts` |
+| A08 | Trả sai đích/thiếu chứng cứ giữ Trip mở. Trả hợp lệ lặp giữ một hóa đơn. | `core.test.ts`, `flows.spec.ts` |
+| A09 | Yêu cầu sạc lặp giữ một phiên. Cổng không tương thích và sai chủ bị từ chối. | `m2.test.ts` |
+| A10 | Chạm biên được cấp. Khoảng giao nhau bị chặn và skipConflicts bỏ đúng buổi. | `m2.test.ts` |
+| A11 | 4 kWh từ 20% đến 70% ở 2 kW cần 2 kWh và 60 phút. Phiên vượt cửa sổ đỗ bị từ chối. | `m2.test.ts`, `flows.spec.ts` |
+| A12 | Hai phiên 2 kW giao nhau bị chặn ở Hub 3 kW. Browser đặt được phương án thay thế. | `m2.test.ts`, `m3.test.ts`, `flows.spec.ts` |
+| A13 | StopPending giữ công suất quá giờ kết thúc. Sau ACK dừng, cổng vẫn chặn cấp vật lý khi còn đầu cắm. | `m2.test.ts`, `flows.spec.ts` |
+| A14 | Fixture REST kiểm 89→90→85→84% và mất heartbeat. Browser kiểm mở, tiếp nhận, đóng trên 15 slot. | `m2.test.ts`, `flows.spec.ts` |
+| A15 | Thiếu hold rollback lần confirm. Xe đã xuất phát chặn hủy cả lệnh. | `m3.test.ts` |
+| A16 | Sự cố xe đã đặt thay xe, giữ hold và tránh áp dụng tác động lần hai. | `m2.test.ts` |
+| A17 | Sự cố item đang đi giữ departedAt và hold khi chuyển NeedsOperatorAction. | `m3.test.ts` |
+| A18 | Preview không cấp tài nguyên. Apply kiểm lại và giữ lịch cũ khi có xung đột. | `m3.test.ts` |
+| A19 | Cùng snapshot/config/seed trả cùng kết quả. Kịch bản trung tính có delta 0 với các chỉ số xác định. | `m3.test.ts` |
+| A20 | Fixture 2 xe/2 chỗ/3 lượt cho Baseline 2 nhận/1 từ chối. Chặn một chỗ cho kịch bản 1 nhận/2 từ chối. | `m3.test.ts` |
+| A21 | What-if giữ nguyên tài nguyên live, lưu kết quả và xử lý run bị gián đoạn. Kiểm khung sạc gợi ý theo cổng, chỗ đỗ và công suất. | `m3.test.ts`, `flows.spec.ts` |
+| A22 | Lỗi ghi trước commit giữ dữ liệu cũ. Lỗi replace bất định được báo riêng và dừng ghi. | `core.test.ts` |
+| A23 | Restart bình thường tiếp tục lệnh cùng ID. Recovery nạp backup giữ lệnh chờ đến lúc Operator đối soát. | `core.test.ts`, `restart.spec.ts` |
+| A24 | Hỏng main nạp backup, hiển thị phiên bản và chặn ghi. Hỏng cả hai bản có lỗi chẩn đoán. Đọc được snapshot schema 1. | `core.test.ts`, `restart.spec.ts` |
+| A25 | Retry cùng ID/payload trả lại kết quả. Cùng ID khác payload trả 409. | `core.test.ts` |
+| A26 | WebSocket yêu cầu phiên và chỉ phát metadata cập nhật chung. Browser nối lại và tải trạng thái mới theo quyền. | `core.test.ts`, `realtime.spec.ts` |
 
-## Yêu cầu chất lượng
+## Chất lượng và trình diễn
 
-| Mục | Minh chứng |
+| ID | Kết quả tự động trên bộ seed |
 |---|---|
-| Q01 | Hai bài tranh tài nguyên, 20 request một xe và 20 request một slot riêng. Mỗi bài chỉ có một thành công. |
-| Q02 | Phép đo Edge từ lúc gửi thay đổi pin đến khi hiển thị cập nhật. Xem `evidence/realtime.json`. Khoảng đo bao gồm thời gian gửi yêu cầu trước commit. |
-| Q03–Q04 | Đã đo p95 cho 120 lượt đọc HTTP localhost và thời gian hoàn tất What-if 3 Hub/6 giờ. Xem [measurements.json](measurements.json). |
-| Q05 | Thử lỗi snapshot bằng fixture, kiểm trạng thái Recovery và chặn ghi. Phục hồi kỹ thuật được kiểm trong môi trường mô phỏng. |
-| Q06–Q07 | Ca role/owner qua REST và WS đã chạy. Kiểm GET sau khi kết nối lại. |
-| Q08 | Đường chạy từ lockfile, bản đã build và kiểm thử Playwright dùng server đã build. |
+| Q01 | Đạt trong hai ca 20 request đồng thời ở A04. |
+| Q02 | Đạt trên 5 mẫu Edge, tối đa 254 ms từ gửi HTTP đến hiển thị. [Mẫu đo](evidence/realtime.json) |
+| Q03 | Đạt trên bốn route đọc, 120 request sau warm-up. p95 3,5 ms. [Số đo](measurements.json) |
+| Q04 | Đạt với 3 Hub và horizon 6 giờ. Mất 445,2 ms từ enqueue tới khi đọc Completed. Có ca kiểm worker nhường event loop. [Số đo](measurements.json) |
+| Q05 | Ca lỗi snapshot và Recovery UI đạt. Mục tiêu phục hồi 5 phút của thiết kế cũ chưa đo. |
+| Q06 | Ca phân quyền REST, owner và payload WebSocket đạt. |
+| Q07 | Ca Edge ngắt WebSocket, sửa pin từ phiên khác và hội tụ sau reconnect đạt. |
+| Q08 | Cài từ lockfile, build và chạy bản build qua Playwright đạt trên máy kiểm chứng. |
 
-## Phạm vi và điều còn mở
+- **E2E-1 đạt.** Tìm và đặt xe, nhận ACK, đổi đích, trả và đọc hóa đơn.
+- **E2E-2 đạt.** Đặt đỗ và lịch sạc, thử vượt công suất, chọn rồi xác nhận phương án thay thế. Phiên đầu vẫn giữ nguyên.
+- **E2E-3 đạt.** Kiểm ngưỡng và tiếp nhận cảnh báo. Cô lập cổng đang cấp điện, kiểm tác động và khôi phục sau ACK dừng.
+- **E2E-4 đạt.** Điều phối đến Hub đích, đối chiếu cùng xe và slot trên backend. Preview và áp dụng lịch sạc.
+- **E2E-5 đạt.** Lưu kịch bản, chạy, đọc so sánh và mở lại kết quả. Ca API kiểm trạng thái live và ca engine kiểm khuyến nghị.
+- **E2E-6 đạt.** Dừng hẳn server, mở lại và kiểm ID/số tiền hóa đơn. Ca Edge riêng thực hiện phần reconnect.
 
-- Bài kiểm tra trên giả lập và seed cục bộ. Không suy rộng p95 từ các route đọc sang tải thật hoặc mọi route. Chưa đo thời gian phục hồi sau lỗi thật theo mục tiêu cũ 5 phút.
-- Luồng trình duyệt kiểm Student, sạc riêng, cảnh báo, điều phối, sự cố, áp dụng lịch sạc và What-if. Ca restart dừng hẳn tiến trình, mở lại bản build, đăng nhập trên Edge và xác minh cùng ID/số tiền hóa đơn. Recovery và WebSocket reconnect có ca kiểm API hoặc hạ tầng riêng.
-- Phạm vi UI giữ nhận xe theo token đặt trước. Trả xe vào chỗ đang giữ hoặc chỗ thay thế hợp lệ cùng Hub, không dùng làn overflow. Sau khi trả xe, Student có thể yêu cầu sạc cho chính xe vừa trả trong cửa sổ demo 30 phút. Operator có thể tạo yêu cầu trong demo. Lịch sạc xếp phiên Waiting, bảo toàn phiên đã cam kết.
-- Dữ liệu, lệnh và ACK được mô phỏng trong cùng backend. Kiểm npm audit của dependency runtime không báo lỗi. Audit toàn bộ dependency còn báo cảnh báo bắc cầu cho bộ công cụ Vite dùng khi build. Cần xác minh nếu nối thiết bị hay phần cứng thật.
-- Nguồn báo cáo phần #1–#3 chọn `btl3_se_final.pdf` theo bản chung đã được nêu trước đó. Phần bổ sung trong PDF thể hiện hành vi bản chạy. Tài liệu cũ ở các chương thiết kế có thể chứa mô tả lịch sử khác với mã nguồn. Nhóm cần xác nhận phần đóng góp của từng thành viên và lịch trình diễn.
+Các ca trên dùng thiết bị giả lập. Nhóm cần chạy thử tay sáu chuỗi trên máy trình diễn, xác nhận đóng góp cá nhân, đối chiếu bản Final và slide trước khi nộp.
 
-Các lệnh có thể chạy lại nằm trong [README](../README.md).
+Phần BTL1–BTL3 trong PDF được lấy từ các trang trước bookmark Submission 4 của bản Final có sẵn trong repo.

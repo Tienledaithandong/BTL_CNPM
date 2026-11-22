@@ -4,7 +4,7 @@ MVP Submission 4 của nhóm Musketeers, CO3001. Student Portal và Operator Das
 
 ## Chạy trên Windows
 
-Yêu cầu Node.js 22.12 trở lên và npm. Bản bàn giao được kiểm với Node.js 24.18.0 và Microsoft Edge. Mở terminal ở thư mục gốc repo `BTL_CNPM`.
+Yêu cầu Node.js 22.12 trở lên và npm. Bản hiện tại đã kiểm với Node.js 24.15.0 và Microsoft Edge. Mở terminal ở thư mục gốc repo `BTL_CNPM`.
 
 ```powershell
 npm.cmd ci
@@ -35,10 +35,10 @@ Mỗi thay đổi đi qua một nhánh riêng và pull request vào main. Trong 
 ## Trình diễn
 
 1. **Student dùng xe chung.** Đăng nhập Student A, chọn EV-02 tại Ga Metro và giữ chỗ đích ở Ký túc xá. Lấy mã trong Chuyến đi, xác nhận nhận xe và chờ ACK. Đổi đích sang Bách Khoa, xác nhận trả tại chỗ đang giữ, mở hóa đơn. Với mức pin seed 65%, tiếp tục gửi yêu cầu sạc đến 80% và xem trạng thái. Nếu đã thay đổi seed trong một lượt demo khác, chọn xe đủ pin có mức dưới 80% khi cần trình diễn sạc.
-2. **Đỗ và sạc xe cá nhân.** Chọn PV_A và một khung giờ còn trống. Xem trước rồi xác nhận. Khi đến giờ, xác nhận vào chỗ. Mở Sạc, chọn booking, công suất và mức pin. Hai phiên giao nhau 2 kW tại cùng Hub sẽ vượt 3 kW. UI hiển thị lỗi và các phương án có thể dùng nếu còn tài nguyên.
+2. **Đỗ và sạc xe cá nhân.** Chọn PV_A ở Ga Metro và đặt chỗ 3 giờ. Lên lịch sạc 2 kW trong 60 phút. Đăng nhập Student B ở một cửa sổ riêng và đặt PV_B tại cùng Hub và khung giờ. Thử sạc 2 kW cùng lúc để thấy giới hạn 3 kW. Chọn **Dùng khung này** ở một phương án thay thế và xác nhận. Khi tới giờ đỗ, xác nhận vào chỗ để bộ giả lập tiếp tục xử lý phiên.
 3. **Operator giám sát và cô lập.** Mở Dashboard để đọc KPI và trạng thái Hub. Tạm dừng heartbeat một Hub trong Điều khiển demo, chờ sau 10 giây và xem Stale. Báo sự cố một cổng, cô lập, đọc ticket/tác động rồi khôi phục khi đủ điều kiện.
 4. **Điều phối và lập lịch.** Đề xuất một xe khả dụng từ Ga Metro đến Ký túc xá. Xác nhận, cho xuất phát, xác nhận đến và hoàn tất. Tạo phiên Waiting bằng cách để thiếu tài nguyên phù hợp, sau đó dùng Lịch sạc để xem ưu tiên, preview và áp dụng khi tài nguyên cho phép.
-5. **What-if.** Tạo kịch bản 3 Hub, 2 giờ, tăng 20% nhu cầu thuê và chặn một slot. Chạy rồi đọc Baseline, What-if, chênh lệch và khuyến nghị. Việc chạy mô phỏng chỉ lưu đầu vào, trạng thái và kết quả.
+5. **What-if.** Tạo kịch bản 3 Hub, 2 giờ, tăng 20% nhu cầu thuê và chặn một slot. Chạy rồi đọc Baseline, What-if, chênh lệch và khuyến nghị. Khung sạc đề xuất cho nhu cầu còn chờ dựa trên cổng, chỗ đỗ và công suất của kịch bản.
 6. **Lưu và phục hồi.** Dừng bằng Ctrl+C rồi chạy lại `npm.cmd start`. Đăng nhập lại để thấy chuyến đi, hóa đơn và kết quả What-if đã lưu. Mất WebSocket sẽ kích hoạt tải lại trạng thái khi kết nối trở lại.
 
 Các thao tác dùng xe/điều phối/sạc tương tác với thiết bị giả lập. Khi tắt ACK tự động, dùng Operator → Điều khiển demo để xác nhận lệnh đã gửi hoặc ghi nhận xe hiện diện và đã khóa ở đúng chỗ. Một ACK âm tính khi mở khóa trong bộ giả lập xác nhận lệnh chưa thực thi và đã bị vô hiệu. Timeout sẽ giữ xe và chỗ đích để đối soát.
@@ -48,7 +48,7 @@ Các thao tác dùng xe/điều phối/sạc tương tác với thiết bị gi�
 - `data/runtime/snapshot.json` chứa bản đang dùng. `snapshot.prev.json` là bản dự phòng có checksum. Seed đọc từ [src/api/seed.json](src/api/seed.json) và gắn thời gian lúc khởi tạo.
 - Với bản demo đang chạy, đăng nhập Operator và dùng **Đặt lại dữ liệu demo** sau khi xác nhận. Thao tác này lấy lại seed và xóa các giao dịch demo hiện có.
 - Nếu cần một lượt demo độc lập, đặt `$env:HUB_DATA_DIR = 'data/demo-lan-2'` trước khi khởi động. Dùng `$env:HUB_PORT = '4180'` để đổi cổng. Dùng `$env:HUB_ENABLE_DEMO = '0'` để tắt API điều khiển demo.
-- Khi tải bản dự phòng, hệ thống chuyển Recovery và chặn thao tác ghi thông thường. Operator kiểm tra dữ liệu phiên bản đã nạp, đối soát các lệnh còn chờ, sau đó xác nhận hoàn tất phục hồi. Khi cả hai tệp hỏng, giữ các tệp để phục hồi và xử lý lỗi trước khi khởi động lại.
+- Khi tải bản dự phòng, hệ thống chuyển Recovery và chặn thao tác ghi thông thường. Trong **Điều khiển demo**, Operator kiểm tra phiên bản đã nạp, xác nhận kết quả từng lệnh còn chờ rồi chọn **Hoàn tất phục hồi**. Với lệnh dừng sạc, xác nhận sau khi biết cổng đã ngắt điện. Khi cả hai tệp hỏng, giữ các tệp để phục hồi và xử lý lỗi trước khi khởi động lại.
 
 ## Kiểm chứng
 
@@ -62,7 +62,7 @@ npm.cmd exec -- tsx tools/measure.ts
 
 Lưu ý: `npm.cmd run test:e2e` tự chạy `npm run build` trước lần đầu (script `pretest:e2e`). Nếu muốn Playwright chạy trên Microsoft Edge, đặt biến `E2E_CHANNEL=msedge` trước khi chạy; mặc định là trình duyệt mặc định của Playwright. Xem [Kiến trúc & mô hình dữ liệu](docs/ARCHITECTURE.md).
 
-Playwright khởi động bản đã build trên cổng riêng và thư mục dữ liệu test riêng. Các phép đo ở [measurements.json](deliverables/measurements.json) dùng seed trên máy demo này. Xem [kết quả kiểm chứng](deliverables/Verification.md) để biết các tình huống được chạy và các mục còn mở.
+Playwright khởi động và thu dọn tiến trình bản đã build trên cổng riêng, với dữ liệu trong thư mục tạm. Các phép đo dùng seed trên máy kiểm chứng. Xem [kết quả kiểm chứng](deliverables/Verification.md) và [số đo](deliverables/measurements.json).
 
 ## Quyết định triển khai
 
@@ -77,4 +77,4 @@ Playwright khởi động bản đã build trên cổng riêng và thư mục d�
 - [Slide PowerPoint](deliverables/Smart_E_Mobility_Hub_Demo.pptx)
 - [Kết quả kiểm chứng và phạm vi](deliverables/Verification.md)
 
-Để tạo lại PDF Final, cài hai thư viện Python reportlab và pypdf, lấy bản BTL3 chung của nhóm, rồi chạy `python tools/build_final_report.py --baseline <duong-dan-PDF-BTL3>` tại gốc repo. PDF Final hiện có trong repo dùng bản BTL3 chung kèm minh chứng trong deliverables/evidence.
+Để tạo lại PDF Final, cài hai thư viện Python reportlab và pypdf rồi chạy `python tools/build_final_report.py --baseline <duong-dan-PDF-BTL3>` tại gốc repo. Có thể dùng `--prior-final <duong-dan-PDF-Final>` để lấy các trang BTL1–BTL3 đứng trước bookmark Submission 4 trong bản Final đã gộp.
