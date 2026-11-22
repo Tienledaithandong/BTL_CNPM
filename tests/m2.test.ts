@@ -155,7 +155,7 @@ test('UC07 shared charging enforces last Trip ownership, request deduplication, 
   await tick();
   const [trip] = (await a('GET','/me/trips')).data;
   const returned = (await a('POST','/trips/'+trip.id+'/return',{ version:trip.version,hubId:'H_BK',slotId:trip.hold.slotId })).data;
-  assert.equal(typeof returned.endedAt,'number');
+  assert.equal(returned.endedAt,new Date(start).toISOString());
   await b('POST','/charging/requests',{ vehicleId:'EV-03' },403);
   const bad = await a('POST','/charging/requests',{ vehicleId:'EV-03',chargingPointId:'H_METRO-C1' },409);
   assert.equal(bad.error.code,'POINT_INCOMPATIBLE');
@@ -191,7 +191,7 @@ test('A14 parking fixture triggers live alert hysteresis, acknowledgement and pr
   assert.equal(alert.type,'PARKING');
   const ack = (await op('POST','/operator/alerts/'+alert.id+'/acknowledge',{version:alert.version})).data;
   assert.equal(ack.status,'Open');
-  assert.equal(typeof ack.acknowledgedAt,'number');
+  assert.equal(ack.acknowledgedAt,new Date(start).toISOString());
   await op('POST','/operator/demo/events',fixtureInput(85));
   assert.equal((await open())[0].id,alert.id);
   await op('POST','/operator/demo/events',fixtureInput(84));

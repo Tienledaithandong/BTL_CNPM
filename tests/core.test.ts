@@ -1,6 +1,6 @@
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import WebSocket from 'ws';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -163,6 +163,98 @@ test('A23: persisted command survives restart and ACK application is durable',as
   } finally {await after.app.close();}
 });
 
+test('A23/A24: backup commands require explicit reconciliation even after a second restart',async t=>{
+  const e=await environment(t);
+  const reserved=(await e.post(e.student,'/reservations',reservePayload)).json<{data:Reservation}>().data;
+  const picked=await e.post(e.student,'/reservations/'+reserved.id+'/pickup',{token:reserved.token,version:reserved.version});
+  const unlockId=picked.json().data.commandId;
+  const charge=await e.post(e.operator,'/charging/requests',{vehicleId:'EV-03',target:80});
+  assert.equal(charge.statusCode,200,charge.body);
+  await e.store.system(tx => {
+    const dispatched=tx.state.commands.find(command => command.type==='CHARGE_START')!;
+    dispatched.dispatchedAt=tx.now;
+  });
+  await e.store.system(tx => tx.log('TEST_CHECKPOINT','snapshot','Rotate backup'));
+  await writeFile(join(e.directory,'snapshot.json'),'corrupt');
+  let system=await createApp({directory:e.directory,background:false,clock:e.store.clock});
+  t.after(async () => { await system.app.close(); });
+  async function operatorCookie() {
+    const response=await system.app.inject({method:'POST',url:'/api/auth/login',payload:{userId:'OPERATOR_A',password:'demo'}});
+    return String(response.headers['set-cookie']).split(';')[0];
+  }
+  let cookie=await operatorCookie();
+  const event=(payload:object,key=randomUUID()) => system.app.inject({
+    method:'POST',url:'/api'+demo,headers:{cookie,'idempotency-key':key},payload,
+  });
+  const backup=system.store.snapshot();
+  await system.tick();
+  assert.deepEqual(system.store.snapshot(),backup);
+  assert.equal((await event({kind:'recover',confirm:true})).json().error.code,'DEVICE_PENDING');
+  assert.equal((await event({kind:'ack',commandId:unlockId,success:true})).json().error.code,'RECOVERY');
+  const payload={kind:'reconcile-command',commandId:unlockId,success:true,confirm:true};
+  const key=randomUUID();
+  const reconciled=await event(payload,key);
+  assert.equal(reconciled.statusCode,200,reconciled.body);
+  assert.equal(reconciled.json().data.dispatchedAt,null);
+  assert.equal(system.store.snapshot().trips.length,1);
+  await system.app.close();
+  system=await createApp({directory:e.directory,background:false,clock:e.store.clock});
+  cookie=await operatorCookie();
+  assert.match(system.store.recoveryReason ?? '',/phiên bản/);
+  await system.tick();
+  assert.equal(system.store.snapshot().commands[1].status,'Pending');
+  assert.deepEqual((await event(payload,key)).json(),reconciled.json());
+  assert.equal(system.store.snapshot().trips.length,1);
+  const commandId=system.store.snapshot().commands[1].id;
+  assert.equal((await event({kind:'reconcile-command',commandId,success:true,confirm:true})).statusCode,200);
+  assert.equal(system.store.snapshot().sessions[0].status,'Charging');
+  assert.equal((await event({kind:'recover',confirm:true})).statusCode,200);
+  assert.equal(system.store.recoveryReason,null);
+});
+
+test('A02: telemetry ordering and stale or faulty vehicles are reflected by the Student read model and guards',async t=>{
+  const e=await environment(t);
+  const payload={kind:'battery',vehicleId:'EV-01',batteryPercent:80,sequence:10,observedAt:new Date(e.store.clock()).toISOString()};
+  assert.equal((await e.post(e.operator,demo,payload)).json().data.sequence,10);
+  assert.equal((await e.post(e.operator,demo,{...payload,batteryPercent:10})).json().data.reason,'SEQUENCE_NOT_NEWER');
+  const older={...payload,sequence:11,observedAt:new Date(e.store.clock()-1000).toISOString()};
+  assert.equal((await e.post(e.operator,demo,older)).json().data.reason,'OBSERVATION_OLDER');
+  const view=(await e.get(e.student,'/vehicles/EV-01')).json().data;
+  assert.equal(view.batteryPercent,80);
+  assert.equal(view.observedAt,payload.observedAt);
+  const r=(await e.post(e.student,'/reservations',reservePayload)).json().data;
+  e.advance(60_001);
+  const stale=(await e.get(e.student,'/vehicles/EV-01')).json().data;
+  assert.equal(stale.telemetryStatus,'Unknown');
+  assert.equal(stale.canReserve,false);
+  assert.equal((await e.post(e.other,'/reservations',{...reservePayload,vehicleId:'EV-02'})).json().error.code,'STALE_TELEMETRY');
+  const pickup=(await e.get(e.student,'/me/reservations')).json().data[0];
+  assert.equal(pickup.canPickup,false);
+  assert.match(pickup.pickupReason,/đã cũ/);
+  assert.equal((await e.post(e.student,'/reservations/'+r.id+'/pickup',{token:r.token,version:r.version})).json().error.code,'PICKUP_UNAVAILABLE');
+  await e.store.system(tx => { tx.state.vehicles.find(v => v.id==='EV-01')!.healthStatus='Faulty'; });
+  await e.post(e.operator,demo,{kind:'battery',vehicleId:'EV-01',batteryPercent:90});
+  assert.match((await e.get(e.student,'/me/reservations')).json().data[0].pickupReason,/lỗi/);
+  assert.equal(e.store.snapshot().activity.filter(event => event.type==='TELEMETRY_IGNORED').length,2);
+});
+
+test('Snapshot v1 opens with epoch dates and retains state when converted to v2 UTC',async t=>{
+  const e=await environment(t);
+  const first=await e.post(e.student,'/reservations',reservePayload,'v1-fixture');
+  const legacy=e.store.snapshot();
+  const checksum=createHash('sha256').update(JSON.stringify(legacy)).digest('hex');
+  const path=join(e.directory,'snapshot.json');
+  await writeFile(path,JSON.stringify({schemaVersion:1,checksum,state:legacy}));
+  const reopened=await Store.open(e.directory,e.store.clock);
+  assert.deepEqual(reopened.snapshot(),legacy);
+  await reopened.system(tx => tx.log('MIGRATION_CHECK','snapshot','Commit v2'));
+  const disk=JSON.parse(await readFile(path,'utf8'));
+  assert.equal(disk.schemaVersion,2);
+  assert.equal(disk.state.reservations[0].expiresAt,first.json().data.expiresAt);
+  assert.equal(disk.state.holds[0].endAt,null);
+  assert.deepEqual((await Store.open(e.directory,e.store.clock)).snapshot(),reopened.snapshot());
+});
+
 test('A26/Q06-Q07: WebSocket authorization, redacted invalidation and state after reconnect', {timeout:8000}, async(t)=>{
   const e=await environment(t);
   const address=await e.app.listen({host:'127.0.0.1',port:0});
@@ -179,7 +271,10 @@ test('A26/Q06-Q07: WebSocket authorization, redacted invalidation and state afte
     await e.post(e.student,'/reservations',reservePayload);
     const [frame]=await next;
     const update=JSON.parse(String(frame));
-    assert.deepEqual(Object.keys(update).sort(),['stateVersion','type']);
+    assert.deepEqual(Object.keys(update).sort(),['entityRef','eventId','occurredAt','stateVersion','type']);
+    assert.equal(update.entityRef,null);
+    assert.notEqual(update.eventId,initial.eventId);
+    assert.equal(update.occurredAt,new Date(e.store.clock()).toISOString());
     assert.ok(update.stateVersion>initial.stateVersion);
   } finally {first.close(); await once(first,'close');}
   const offscreen=await e.post(e.operator,demo,{kind:'battery',vehicleId:'EV-02',batteryPercent:18});

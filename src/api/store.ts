@@ -2,15 +2,16 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createSeed } from './seed.js';
+import { formatTimestamp, parseTimestamp } from './time-format.js';
 import { fail, type Actor, type Command, type State, type Tx } from './types.js';
 
-const SCHEMA = 1;
+const SCHEMA = 2;
 export type SaveStage = 'before-backup' | 'before-replace' | 'replace-reported-error' | 'after-replace';
 type Fault = (stage: SaveStage) => void;
-interface Stored { schemaVersion: number; checksum: string; state: State }
+interface Stored { schemaVersion: number; checksum: string; state: unknown }
 class UncertainCommit extends Error {}
 
-function checksum(state: State): string {
+function checksum(state: unknown): string {
   return createHash('sha256').update(JSON.stringify(state)).digest('hex');
 }
 
@@ -84,9 +85,10 @@ export function validateState(state: State): void {
 
 async function decode(path: string): Promise<State> {
   const row = JSON.parse(await readFile(path,'utf8')) as Stored;
-  if (row.schemaVersion !== SCHEMA || checksum(row.state) !== row.checksum) throw new Error('Invalid snapshot checksum or schema');
-  validateState(row.state);
-  return row.state;
+  if (![1, SCHEMA].includes(row.schemaVersion) || checksum(row.state) !== row.checksum) throw new Error('Invalid snapshot checksum or schema');
+  const state: State = row.schemaVersion === 1 ? row.state as State : JSON.parse(JSON.stringify(row.state), parseTimestamp);
+  validateState(state);
+  return state;
 }
 
 async function writeAtomicTemp(path: string, data: string): Promise<void> {
@@ -111,7 +113,7 @@ export class Store {
   private constructor(private readonly directory: string, state: State, recoveryReason: string | null,
     readonly clock: () => number, private readonly fault?: Fault) {
     this.state = state;
-    this.recoveryReason = recoveryReason;
+    this.recoveryReason = recoveryReason ?? state.recoveryReason ?? null;
     this.primaryTrusted = recoveryReason === null;
   }
 
@@ -177,7 +179,10 @@ export class Store {
     const backup = join(this.directory,'snapshot.prev.json');
     const mainTemp = main + '.' + randomUUID() + '.tmp';
     const backupTemp = backup + '.' + randomUUID() + '.tmp';
-    const serialized = (s: State) => JSON.stringify({schemaVersion:SCHEMA,checksum:checksum(s),state:s});
+    const serialized = (s: State) => {
+      const state: unknown = JSON.parse(JSON.stringify(s, formatTimestamp));
+      return JSON.stringify({schemaVersion:SCHEMA,checksum:checksum(state),state});
+    };
     try {
       await writeAtomicTemp(mainTemp, serialized(state));
       await decode(mainTemp);
@@ -224,6 +229,7 @@ export class Store {
       }
       if (this.recoveryReason && !options.recovery) fail(503,'RECOVERY',this.recoveryReason);
       const draft = this.snapshot();
+      if (this.recoveryReason) draft.recoveryReason = this.recoveryReason;
       const data = fn(this.tx(draft, actor));
       if (!key && JSON.stringify(draft) === JSON.stringify(this.state))
         return {data,stateVersion:this.version};
@@ -237,6 +243,7 @@ export class Store {
           const actual = await decode(join(this.directory, 'snapshot.json')).catch(() => undefined);
           if (actual?.version === draft.version) {
             this.state = actual;
+            this.recoveryReason = actual.recoveryReason ?? null;
             published = actual.version;
             fail(503,'RESPONSE_INTERRUPTED','Giao dịch đã lưu. Gửi lại cùng mã yêu cầu để nhận kết quả.');
           }
@@ -244,6 +251,7 @@ export class Store {
         fail(503,'SNAPSHOT_WRITE_FAILED','Không lưu được snapshot. Giao dịch chưa được công bố.');
       }
       this.state = draft;
+      this.recoveryReason = draft.recoveryReason ?? null;
       published = draft.version;
       return {data:structuredClone(data),stateVersion:draft.version};
     } finally {
@@ -259,13 +267,18 @@ export class Store {
   }
 
   async recover(operator: Actor): Promise<void> {
-    if (!this.recoveryReason) return;
     await this.write(operator, (tx) => {
+      if (!tx.state.recoveryReason) return;
       if (tx.state.commands.some((c) => c.status === 'Pending'))
         fail(409,'DEVICE_PENDING','Cần đối soát tất cả lệnh đang chờ trước khi thoát phục hồi.');
+      for (const run of tx.state.runs.filter(run => run.status === 'Running')) {
+        run.status = 'Failed';
+        run.error = 'INTERRUPTED';
+        run.finishedAt = tx.now;
+      }
       tx.log('RECOVERY_CONFIRMED','snapshot','Operator đã đối soát snapshot và dữ liệu thiết bị.');
+      delete tx.state.recoveryReason;
     }, {recovery:true});
-    this.recoveryReason = null;
   }
 
   async close(): Promise<void> { await this.serial; }

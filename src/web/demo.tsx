@@ -21,6 +21,7 @@ export function OperatorDemo({ revision, refresh }: { revision:number; refresh:(
   const [returnSlot, setReturnSlot] = useState('');
   const [resetConfirm, setResetConfirm] = useState(false);
   const [recoverConfirm, setRecoverConfirm] = useState(false);
+  const [verifiedCommand, setVerifiedCommand] = useState('');
   const action = useAction(refresh);
   const input = (kind:string, values:Record<string,unknown>, message:string) => action.run(() => mutate('/operator/demo/events',{kind,...values}),message);
   const ready = !!demo.data && !action.busy;
@@ -34,7 +35,7 @@ export function OperatorDemo({ revision, refresh }: { revision:number; refresh:(
     <Feedback feedback={action.feedback} />
     {recovering && <Card title="Phục hồi dữ liệu" subtitle={demo.data?.recoveryReason ?? undefined}>
       <label className="checkbox"><input type="checkbox" checked={recoverConfirm} onChange={(event) => setRecoverConfirm(event.target.checked)} /> Tôi đã đối soát các lệnh thiết bị và trạng thái cần phục hồi.</label>
-      <div><Button disabled={!ready || !recoverConfirm} onClick={() => { void input('recover',{ confirm:true },'Đã xác nhận phục hồi.'); }}>Hoàn tất phục hồi</Button></div>
+      <div><Button disabled={!ready || !recoverConfirm || pending.length > 0} onClick={() => { void input('recover',{ confirm:true },'Đã xác nhận phục hồi.'); }}>Hoàn tất phục hồi</Button></div>
     </Card>}
     <Card title="Lệnh thiết bị mô phỏng" extra={demo.data && <Badge value={demo.data.autoAck ? 'Healthy' : 'Unknown'} />}>
       <div className="actions"><Button disabled={!ready || recovering} onClick={() => { void input('autoAck',{enabled:!demo.data?.autoAck},'Đã cập nhật chế độ phản hồi thiết bị.'); }}>
@@ -44,7 +45,13 @@ export function OperatorDemo({ revision, refresh }: { revision:number; refresh:(
         { label:'Loại', value:(item) => item.type==='UNLOCK' ? 'Mở khóa' : item.type==='CHARGE_START' ? 'Cấp điện' : 'Ngắt điện' },
         { label:'Tài nguyên', value:(item) => item.resourceId },
         { label:'Đã gửi lúc', value:(item) => <DateTime value={item.dispatchedAt} /> },
-        { label:'Phản hồi', value:(item : Command) => <div className="actions">
+        { label:'Phản hồi', value:(item : Command) => recovering ? <div className="stack">
+          <label className="checkbox"><input type="checkbox" checked={verifiedCommand===item.id} onChange={(event) => setVerifiedCommand(event.target.checked ? item.id : '')} /> Đã kiểm tra thiết bị cho lệnh này</label>
+          <div className="actions">
+            <Button compact disabled={!ready || verifiedCommand!==item.id} onClick={() => { void input('reconcile-command',{commandId:item.id,success:true,confirm:true},'Đã đối soát lệnh.'); }}>Xác nhận đã thực hiện</Button>
+            {item.type!=='CHARGE_STOP' && <Button compact disabled={!ready || verifiedCommand!==item.id} onClick={() => { void input('reconcile-command',{commandId:item.id,success:false,confirm:true},'Đã ghi nhận lệnh không thực thi và đã vô hiệu.'); }}>Xác nhận chưa thực hiện và đã vô hiệu</Button>}
+          </div>
+        </div> : <div className="actions">
           <Button compact disabled={!ready || item.dispatchedAt===null} tone="primary" onClick={() => { void input('ack',{commandId:item.id,success:true},'Đã ghi nhận ACK thành công.'); }}>ACK thành công</Button>
           <Button compact disabled={!ready || item.dispatchedAt===null} tone="danger" onClick={() => { void input('ack',{commandId:item.id,success:false},'Đã gửi ACK lỗi.'); }}>ACK lỗi</Button>
         </div> },
