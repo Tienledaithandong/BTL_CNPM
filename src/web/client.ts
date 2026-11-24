@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
+import { parseTimestamp } from '../api/time-format';
 import type { Hub, Reservation, Trip, Hold, Vehicle, Point } from '../api/types';
 
 export type Account = { id: string; role: 'STUDENT' | 'OPERATOR'; name?: string };
 export type HubView = Hub & { availableVehicles: number; availableSlots: number; availablePoints: number; points?: Array<Pick<Point, 'id'|'hubId'|'connectorType'|'ratedKW'|'blocked'>> };
 export type VehicleView = Omit<Vehicle, 'allocationOwner'> & Pick<Partial<Vehicle>, 'allocationOwner'> & { eligible: boolean; reason?: string | null };
-export type ReservationView = Reservation & { hold: Hold | null };
+export type ReservationView = Reservation & { hold: Hold | null; canPickup: boolean; pickupReason: string | null; needsReconciliation: boolean };
 export type TripView = Trip & { hold: Hold | null };
 
 type ApiResponse<T> = { data: T; stateVersion: number; requestId: string } | { error: { code: string; message: string; details?: unknown }; requestId: string };
@@ -19,7 +20,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     headers: { Accept: 'application/json', ...options.headers },
   });
   let result: ApiResponse<T>;
-  try { result = await response.json() as ApiResponse<T>; }
+  try { result = JSON.parse(await response.text(), parseTimestamp) as ApiResponse<T>; }
   catch {
     throw new ApiError(response.status, 'INVALID_RESPONSE', 'Máy chủ không trả dữ liệu mong đợi. Hãy kiểm tra kết nối và thử lại.');
   }
@@ -117,8 +118,16 @@ export function useConnection(active: boolean, refresh: () => void) {
       if (stopped) return;
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      let lastVersion = -1;
       socket.onopen = () => { if (!stopped) { delay = 500; setConnected(true); scheduleRefresh(); } };
-      socket.onmessage = scheduleRefresh;
+      socket.onmessage = (event) => {
+        let message: { type?: string; stateVersion?: number };
+        try { message = JSON.parse(event.data); } catch { return; }
+        if (message?.type !== 'state.changed' || typeof message.stateVersion !== 'number' ||
+            !Number.isSafeInteger(message.stateVersion) || message.stateVersion <= lastVersion) return;
+        lastVersion = message.stateVersion;
+        scheduleRefresh();
+      };
       socket.onerror = () => socket?.close();
       socket.onclose = () => {
         if (stopped) return;

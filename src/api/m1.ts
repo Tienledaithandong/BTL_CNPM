@@ -77,16 +77,27 @@ function tokenMatches(expected: string, received: string) {
   return a.length===b.length && timingSafeEqual(a,b);
 }
 
+function pickupBlock(tx: Tx, reservation: Reservation): string | null {
+  if (reservation.status !== 'Reserved' || reservation.expiresAt <= tx.now)
+    return 'Lượt đặt không còn ở trạng thái có thể nhận xe.';
+  const vehicle = entity(tx.state.vehicles,reservation.vehicleId,'xe');
+  if (!fresh(vehicle,tx.now)) return 'Dữ liệu pin chưa có hoặc đã cũ.';
+  if ((vehicle.batteryPercent ?? 0) < 20) return 'Pin chưa đủ 20% để nhận xe.';
+  if (vehicle.healthStatus !== 'OK') return 'Xe đang lỗi hoặc bảo trì.';
+  if (vehicle.allocationOwner?.type !== 'SHARED_RESERVATION' || vehicle.allocationOwner.id !== reservation.id ||
+      vehicle.mobilityStatus !== 'Reserved' || !vehicle.slotId || busyCharging(tx.state,vehicle.id))
+    return 'Xe không còn ở trạng thái có thể nhận.';
+  return null;
+}
+
 function pickup(tx: Tx, input: Input) {
   const row=getReservation(tx,input);
   checkVersion(input,row);
   if (row.status !== 'Reserved' || row.expiresAt <= tx.now) fail(409,'INVALID_TRANSITION','Lượt đặt không còn ở trạng thái có thể nhận xe.');
   if (!tokenMatches(row.token, requiredString(input,'token'))) fail(400,'INVALID_TOKEN','Mã nhận xe không khớp.');
+  const reason=pickupBlock(tx,row);
+  if (reason) fail(409,'PICKUP_UNAVAILABLE',reason);
   const vehicle=entity(tx.state.vehicles,row.vehicleId,'xe');
-  if (vehicle.allocationOwner?.type !== 'SHARED_RESERVATION' || vehicle.allocationOwner.id !== row.id ||
-    vehicle.mobilityStatus !== 'Reserved' || vehicle.healthStatus !== 'OK' || !vehicle.slotId || busyCharging(tx.state,vehicle.id) ||
-    !fresh(vehicle,tx.now) || (vehicle.batteryPercent ?? 0) < 20)
-    fail(409,'PICKUP_UNAVAILABLE','Xe hoặc dữ liệu xe không đáp ứng điều kiện nhận.');
   const command=tx.command('UNLOCK',vehicle.id,row.id);
   row.status='UnlockPending';
   row.commandId=command.id;
@@ -98,7 +109,7 @@ function pickup(tx: Tx, input: Input) {
 }
 
 export function applyUnlockAck(tx: Tx, command: Command, success: boolean): void {
-  if (command.status !== 'Pending' || command.type !== 'UNLOCK' || command.dispatchedAt === null) return;
+  if (command.status !== 'Pending' || command.type !== 'UNLOCK') return;
   const reservation=entity(tx.state.reservations,command.subjectId,'lượt đặt');
   if (reservation.status !== 'UnlockPending' || reservation.commandId !== command.id) return;
   const vehicle=entity(tx.state.vehicles,command.resourceId,'xe');
@@ -267,7 +278,7 @@ export function registerM1(add: AddRoute): void {
   const vehicleView=(tx: Tx,v: Vehicle) => {
     const reason=eligibility(v,tx.now,tx.state);
     const {allocationOwner,...pub}=v;
-    return {...pub,eligible:!reason,reason,telemetryStatus:fresh(v,tx.now)?'Fresh':'Unknown'};
+    return {...pub,eligible:!reason,canReserve:!reason,reason,telemetryStatus:fresh(v,tx.now)?'Fresh':'Unknown'};
   };
   const publicHub=(tx: Tx, id: string) => {
     const {points,...summary}=hubSummary(tx.state,id,tx.now);
@@ -280,7 +291,12 @@ export function registerM1(add: AddRoute): void {
     (!i.hubId || v.hubId===i.hubId) && (!i.type || v.type===i.type)).map((v) => vehicleView(tx,v)));
   add('GET','/vehicles/:id','ANY',(tx,i) => vehicleView(tx,entity(tx.state.vehicles,requiredString(i,'id'),'xe')));
   add('GET','/me/reservations','STUDENT',(tx) => tx.state.reservations.filter((r) => r.userId===tx.actor.id)
-    .map((r) => ({...r,hold:entity(tx.state.holds,r.holdId,'chỗ đích')})));
+    .map((r) => {
+      const pickupReason = pickupBlock(tx,r);
+      const command = tx.state.commands.find(c => c.id===r.commandId);
+      return {...r,hold:entity(tx.state.holds,r.holdId,'chỗ đích'),canPickup:pickupReason===null,pickupReason,
+        needsReconciliation:command?.status==='Pending' && command.probeCount>=2};
+    }));
   add('GET','/me/trips','STUDENT',(tx) => tx.state.trips.filter((t) => t.userId===tx.actor.id)
     .map((t) => ({...t,hold:entity(tx.state.holds,t.holdId,'chỗ đích'),invoice:tx.state.invoices.find((i) => i.tripId===t.id)})));
   add('GET','/me/invoices','STUDENT',(tx) => tx.state.invoices.filter((i) => i.userId===tx.actor.id));

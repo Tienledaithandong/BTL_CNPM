@@ -12,7 +12,7 @@ const submit = (event: FormEvent<HTMLFormElement>, action: () => void) => { even
 
 type HubOverview = Omit<HubView, 'points'> & {
   occupiedSlots: number; totalSlots: number; parkingOccupancyPct: number | null; powerInUseKW: number; stale: boolean;
-  openAlerts: number; points: Array<Point & { occupancy: string; activeSessionId: string | null }>;
+  openAlerts: number; slots: Slot[]; points: Array<Point & { occupancy: string; activeSessionId: string | null }>;
 };
 type Overview = { hubs: HubOverview[]; totals: Partial<Omit<HubOverview, keyof HubView | 'points'>> & Partial<Pick<HubView,'availableVehicles'|'availableSlots'|'availablePoints'>> };
 const sum = (hubs: HubOverview[], key: 'availableVehicles' | 'availableSlots' | 'availablePoints' | 'openAlerts' | 'occupiedSlots' | 'totalSlots') => hubs.reduce((total, hub) => total + (hub[key] ?? 0), 0);
@@ -43,6 +43,13 @@ export function OperatorOverview({ revision }: PageProps) {
         <hr className="divider"/>
         <h3>{hub.availablePoints} cổng sạc khả dụng</h3>
         {hub.points?.map((point) => <div className="row between" key={point.id}><span className="small">{point.id} · {point.ratedKW} kW</span><Badge value={point.blocked ? 'Blocked' : point.occupancy} /></div>)}
+        <details><summary>Chi tiết vị trí đỗ</summary>
+          <DataTable rows={hub.slots} label={`Vị trí đỗ ${hub.name}`} empty="Hub chưa có vị trí đỗ." columns={[
+            {label:'Vị trí',value:slot => slot.id},
+            {label:'Xe hiện diện',value:slot => slot.vehicleId ?? '—'},
+            {label:'Trạng thái vật lý',value:slot => <Badge value={slot.blocked ? 'Blocked' : slot.vehicleId ? 'Occupied' : 'Empty'} />},
+          ]}/>
+        </details>
       </Card>)}
     </div>
     {!hubs.length && !overview.pending && <Empty>Chưa có dữ liệu hub.</Empty>}

@@ -7,7 +7,8 @@ Mô tả cách code được tổ chức: các module M1/M2/M3, mô hình trạn
 | Tệp | Vai trò |
 |---|---|
 | `src/api/types.ts` | Hợp đồng dữ liệu (`State`, các entity), `DomainError`/`fail` và helper kiểm tra đầu vào (`requiredString`, `number`, `instant`, `entity`, `checkVersion`, `owned`, `refreshAvailability`). |
-| `src/api/store.ts` | `Store`: mô hình lưu và đọc snapshot, `validateState`, giao thức save/backup/recovery, ghi giao dịch tuần tự, idempotency. |
+| `src/api/store.ts` | `Store`: đọc và ghi snapshot, kiểm bất biến, ghi tuần tự, retry và Recovery. |
+| `src/api/time-format.ts` | Chuyển timestamp giữa ISO UTC trên REST, WebSocket, snapshot và epoch mili giây dùng trong nghiệp vụ/UI. |
 | `src/api/m1.ts` | **M1** (xe dùng chung): đặt xe, nhận xe (ACK mở khóa), trả xe (đổi đích, trả chỗ), giả lập thiết bị mở khóa. |
 | `src/api/m2.ts` | **M2**: đỗ xe cá nhân (preview/đặt/nhận/rời), sạc (yêu cầu, kế hoạch ưu tiên), cảnh báo/cô lập tài nguyên, hồ sơ phương thức giả lập. |
 | `src/api/m3.ts` | **M3**: điều phối (lệnh chuyển xe), kế hoạch sạc ưu tiên, kịch bản What-if (baseline/scenario/delta + khuyến nghị). |
@@ -53,17 +54,23 @@ Mô tả cách code được tổ chức: các module M1/M2/M3, mô hình trạn
 
 ### Mã giao dịch với thiết bị
 - Lệnh tạo bởi phiên/đặt điểm `dispatchedAt`, tick sẽ dispatch (`attempts++`, `nextProbeAt`).
-- `autoAck` (mặc định seed `true`): tick apply `applyChargingAck`/`applyUnlockAck` thành công ngay sau khi dispatched.
-- Auto-Ack âm tính được dùng để ACK xác nhận "lệnh không thực thi".
-- Recovery không apply ACK trừ khi dispatched (comment trong `runTick`).
+- Trong chế độ bình thường, tick dispatch lệnh chưa gửi và dùng `autoAck` khi đã bật. Restart từ bản chính tiếp tục lệnh với cùng ID.
+- ACK mở khóa âm xác nhận lệnh chưa thực hiện và đã bị vô hiệu. Lệnh dừng sạc chỉ nhả công suất sau xác nhận đã ngắt điện.
+- Khi Recovery, tick tự động dừng. Operator gửi `kind: 'reconcile-command'` với `commandId`, `success` và `confirm: true` sau khi kiểm thiết bị. Có thể đối soát lệnh thiếu `dispatchedAt` trong backup. Snapshot lưu trạng thái Recovery qua các lần đối soát và khởi động lại.
+- WebSocket phát `eventId`, `type: 'state.changed'`, `entityRef: null`, `stateVersion`, `occurredAt`. Client bỏ qua version cũ trên cùng kết nối và GET lại khi có version mới hoặc reconnect. Artifact nội bộ và dữ liệu riêng được truy cập qua route có quyền.
+- Sự kiện pin demo nhận thêm `sequence` và `observedAt` tùy chọn. Gói trùng, sequence thấp hơn hoặc giờ quan sát cũ được ghi `TELEMETRY_IGNORED`.
 
 ## 3. Lưu & phục hồi snapshot (Store)
 
 - Cấu trúc `snapshot.json` + `snapshot.prev.json` (bản trước) + `.initialized`.
-- `checksum` sha256 của `canonical(state)`; `validateState` đọc và trước mỗi save.
+- `checksum` là SHA-256 của JSON trạng thái đã tuần tự hóa. Schema 2 lưu timestamp ISO UTC. Bộ đọc kiểm checksum theo schema gốc và tiếp tục đọc schema 1 dùng epoch. Lần ghi thành công kế tiếp ghi schema 2.
 - Giao thức save: ghi `snapshot.json.<uuid>.tmp` (O_EXCL) → decode-validate temp → ghi backup của main trước đó (`snapshot.prev.json`) → rename backup → rename temp → main. Các fault stage dùng test: `before-backup`, `before-replace`, `replace-reported-error`, `after-replace`.
 - Ambiguous: rename sau successful replace lỗi → `COMMIT_UNCERTAIN` (retry cùng idempotency key); lỗi sau replace → `RESPONSE_INTERRUPTED` (đã lưu, gửi lại cùng key để nhận kết quả).
 - Recovery: main hoặc backup lỗi checksum/schema → `Store.open` nạp backup, đặt `recoveryReason`, ghi bị chặn (`503 RECOVERY`), operator khôi phục qua `POST /api/operator/demo/events {kind:'recover', confirm:true}` sau khi đối soát (đợi `DEVICE_PENDING` tất cả lệnh đang chờ). Nếu cả hai bản hỏng → chặn toàn bộ.
+
+### What-if
+
+Worker dùng snapshot và seed đã chụp rồi nhường event loop theo lô tick. Bộ tick theo dõi thiết bị chạy riêng trong lúc tính. Hai nhánh dùng cùng quy tắc kiểm công suất theo các mốc giao nhau với nghiệp vụ sạc. Khung thay thế cho yêu cầu ưu tiên còn chờ được kiểm với cổng, chỗ đỗ và công suất trong 6 giờ sau horizon. Điều phối kiểm chỗ đích theo slot bị chặn trong kịch bản.
 
 ## 4. Mã lỗi (glossary)
 

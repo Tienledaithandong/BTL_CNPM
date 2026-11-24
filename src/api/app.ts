@@ -9,7 +9,8 @@ import { registerM2, m2Tick, applyChargingAck, simulatePhysicalEvent } from './m
 import { registerM3, computeSimulation } from './m3.js';
 import { Store, type SaveStage } from './store.js';
 import { createSeed } from './seed.js';
-import { DomainError, entity, fail, number, refreshAvailability, requiredString,
+import { formatTimestamp } from './time-format.js';
+import { DomainError, entity, fail, instant, number, refreshAvailability, requiredString,
   type Actor, type AddRoute, type Command, type Input, type Tx } from './types.js';
 
 const permittedAccounts: Actor[] = [
@@ -31,7 +32,6 @@ function safeEquals(a: string,b: string): boolean {
 }
 
 function applyAck(tx: Tx, command: Command, success: boolean) {
-  if (command.dispatchedAt===null) fail(409,'DEVICE_PENDING','Lệnh chưa được gửi đến thiết bị.');
   if (command.type==='UNLOCK') applyUnlockAck(tx,command,success);
   else applyChargingAck(tx,command,success);
 }
@@ -62,15 +62,35 @@ function demoEvent(tx: Tx,i: Input, slots?: number): unknown {
     const v=entity(tx.state.vehicles,requiredString(i,'vehicleId'),'xe');
     const battery=number(i,'batteryPercent');
     if (battery<0 || battery>100) fail(400,'INVALID_INPUT','Pin phải từ 0 đến 100%.');
+    const observedAt=i.observedAt===undefined ? tx.now : instant(i,'observedAt');
+    const sequence=i.sequence===undefined ? v.sequence+1 : number(i,'sequence');
+    if (!Number.isSafeInteger(sequence) || sequence<0 || observedAt>tx.now)
+      fail(400,'INVALID_INPUT','Sequence phải là số nguyên không âm và thời điểm quan sát không được ở tương lai.');
+    if (sequence<=v.sequence || (v.observedAt!==null && observedAt<v.observedAt)) {
+      const reason=sequence<=v.sequence ? 'SEQUENCE_NOT_NEWER' : 'OBSERVATION_OLDER';
+      tx.log('TELEMETRY_IGNORED',v.id,reason);
+      return {...v,ignored:true,reason};
+    }
     v.batteryPercent=battery;
-    v.observedAt=tx.now;
-    ++v.sequence; ++v.version;
+    v.observedAt=observedAt;
+    v.sequence=sequence;
+    ++v.version;
     if (v.mobilityStatus!=='Charging') refreshAvailability(v,tx.now,v.mobilityStatus==='NeedsCharge'?60:20);
     return v;
   }
-  if (kind==='ack') {
+  if (kind==='ack' || kind==='reconcile-command') {
     const command=entity(tx.state.commands,requiredString(i,'commandId'),'lệnh');
     if (typeof i.success!=='boolean') fail(400,'INVALID_INPUT','success cần là true hoặc false.');
+    if (kind==='reconcile-command') {
+      if (!tx.state.recoveryReason) fail(409,'INVALID_TRANSITION','Chỉ đối soát lệnh khi đang phục hồi.');
+      if (i.confirm!==true) fail(400,'CONFIRM_RECOVERY','Hãy xác nhận đã kiểm tra kết quả thực thi của thiết bị.');
+      if (command.status!=='Pending') return command;
+      if (command.type==='CHARGE_STOP' && !i.success)
+        fail(409,'DEVICE_PENDING','Chờ xác nhận cổng đã ngắt điện trước khi hoàn tất đối soát.');
+      tx.log('COMMAND_RECONCILED',command.resourceId,command.id);
+    } else if (command.dispatchedAt===null) {
+      fail(409,'DEVICE_PENDING','Lệnh chưa được gửi đến thiết bị.');
+    }
     applyAck(tx,command,i.success);
     return command;
   }
@@ -93,6 +113,7 @@ export async function createApp(options: AppOptions): Promise<{
   const store=await Store.open(options.directory,options.clock,options.fault,options.slotsPerHub);
   const demo=options.demo ?? true;
   const app=Fastify({logger:options.logger ?? false,bodyLimit:96*1024,requestIdHeader:false});
+  app.setReplySerializer(payload => JSON.stringify(payload, formatTimestamp));
   await app.register(websocket);
   const sessions=new Map<string,{actor:Actor;exp:number}>();
   const sockets=new Map<string,Set<{send(data:string):void;close(code:number):void;readyState:number}>>();
@@ -199,22 +220,25 @@ export async function createApp(options: AppOptions): Promise<{
         return {data:{recovered:true},stateVersion:store.version,requestId:id};
       }
       const result=await store.write(actor,(tx) => demoEvent(tx,i,options.slotsPerHub),{
-        requestId:id,operation:'DEMO_EVENT',payload:i,recovery:i.kind==='ack',
+        requestId:id,operation:'DEMO_EVENT',payload:i,recovery:i.kind==='reconcile-command',
       });
       return {...result,requestId:id};
     });
   }
 
+  const stateEvent=(stateVersion:number) => JSON.stringify({
+    eventId:randomUUID(), type:'state.changed', entityRef:null, stateVersion, occurredAt:new Date(store.clock()).toISOString(),
+  });
   app.get('/ws',{websocket:true,preValidation:async (req) => {allowedOrigin(req); session(req);}},(socket,req) => {
     const token=cookie(req)!;
     const entries=sockets.get(token) ?? new Set();
     entries.add(socket);
     sockets.set(token,entries);
-    socket.send(JSON.stringify({type:'state.changed',stateVersion:store.version}));
+    socket.send(stateEvent(store.version));
     socket.on('close',() => {entries.delete(socket);if (!entries.size) sockets.delete(token);});
   });
   const unsubscribe=store.subscribe((version) => {
-    const data=JSON.stringify({type:'state.changed',stateVersion:version});
+    const data=stateEvent(version);
     for (const [token,entries] of sockets) for (const socket of entries) {
       const current=sessions.get(token);
       if (!current || current.exp<=store.clock()) socket.close(1008);
@@ -241,28 +265,25 @@ export async function createApp(options: AppOptions): Promise<{
     });
   }
   let running: Promise<void>|undefined;
+  let simulation: Promise<void>|undefined;
+  let closing = false;
 
   async function runTick(): Promise<void> {
-    let snapshot=store.snapshot();
-    // The boot recovery branch permits acknowledgement of persisted commands only.
-    const recovering=store.recoveryReason!==null;
+    if (store.recoveryReason) return;
     const now=store.clock();
-    if (!recovering) {
-      await store.system((tx) => {
-        expireReservations(tx);
-        for (const hub of tx.state.hubs) {
-          if (tx.state.demo.pausedHubs.includes(hub.id) || tx.now-(hub.lastSeenAt ?? 0)<2000) continue;
-          hub.lastSeenAt=tx.now;
-          for (const v of tx.state.vehicles.filter((v) => v.hubId===hub.id)) {
-            v.observedAt=tx.now;
-            ++v.sequence;
-          }
+    await store.system((tx) => {
+      expireReservations(tx);
+      for (const hub of tx.state.hubs) {
+        if (tx.state.demo.pausedHubs.includes(hub.id) || tx.now-(hub.lastSeenAt ?? 0)<2000) continue;
+        hub.lastSeenAt=tx.now;
+        for (const v of tx.state.vehicles.filter((v) => v.hubId===hub.id && v.batteryPercent!==null)) {
+          v.observedAt=tx.now;
+          ++v.sequence;
         }
-        m2Tick(tx);
-      });
-      snapshot=store.snapshot();
-    }
-    for (const pending of snapshot.commands.filter((c) => c.status==='Pending')) {
+      }
+      m2Tick(tx);
+    });
+    for (const pending of store.snapshot().commands.filter((c) => c.status==='Pending')) {
       if (pending.dispatchedAt===null) {
         await store.system((tx) => {
           const command=tx.state.commands.find((c) => c.id===pending.id);
@@ -271,23 +292,26 @@ export async function createApp(options: AppOptions): Promise<{
           command.nextProbeAt=tx.now+5000;
           ++command.attempts;
           tx.log('COMMAND_DISPATCH',command.resourceId,command.id);
-        },recovering);
+        });
       }
       await store.system((tx) => {
         const command=tx.state.commands.find((c) => c.id===pending.id);
         if (!command || command.status!=='Pending') return;
-        if (tx.state.demo.autoAck && (!recovering || command.dispatchedAt!==null) &&
-          command.dispatchedAt!==null && now>=command.createdAt) applyAck(tx,command,true);
+        if (tx.state.demo.autoAck && command.dispatchedAt!==null && now>=command.createdAt) applyAck(tx,command,true);
         else if (command.nextProbeAt!==null && tx.now>=command.nextProbeAt && command.probeCount<2) {
           ++command.probeCount;
           command.nextProbeAt=command.probeCount<2 ? tx.now+5000 : null;
           tx.log('DEVICE_RECONCILIATION',command.resourceId,'Chưa có kết quả thiết bị. Giữ tài nguyên để đối soát.');
         }
-      },recovering);
+      });
     }
-    if (recovering) return;
+    if (simulation || closing) return;
     const nextRun=store.snapshot().runs.find((run) => run.status==='Running');
     if (!nextRun) return;
+    simulation=finishRun(nextRun).catch(err => app.log.error(err)).finally(() => { simulation=undefined; });
+  }
+
+  async function finishRun(nextRun: Parameters<typeof computeSimulation>[0]) {
     let result: unknown, error: string|null=null;
     try { result=await computeSimulation(nextRun); }
     catch(err) { error=err instanceof Error ? err.message : 'SIMULATION_FAILED'; }
@@ -301,22 +325,24 @@ export async function createApp(options: AppOptions): Promise<{
     });
   }
 
-  const tick=():Promise<void> => {
+  const tickDevices=():Promise<void> => {
     if (!running) running=runTick().finally(() => {running=undefined;});
     return running;
   };
   const timer=options.background===false ? undefined : setInterval(() => {
-    void tick().catch((err) => app.log.error(err));
+    void tickDevices().catch((err) => app.log.error(err));
   },700);
   timer?.unref();
   app.addHook('preClose',async () => {
+    closing=true;
     if(timer) clearInterval(timer);
     for (const entries of sockets.values()) for (const socket of entries) socket.close(1001);
   });
   app.addHook('onClose',async () => {
     await running?.catch(() => undefined);
+    await simulation;
     await store.close();
     unsubscribe();
   });
-  return {app,store,tick};
+  return {app,store,tick:async () => { await tickDevices(); await simulation; }};
 }

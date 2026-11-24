@@ -59,6 +59,7 @@ export interface Notification { id: string; userId: string; message: string; cre
 export interface Activity { id: string; type: string; actorId: string; at: number; resourceId: string; detail: string }
 export interface Idempotency { operation: string; hash: string; data: unknown; stateVersion: number }
 export interface State {
+  recoveryReason?: string;
   version: number; hubs: Hub[]; vehicles: Vehicle[]; slots: Slot[]; points: Point[]; holds: Hold[];
   privateVehicles: PrivateVehicle[]; reservations: Reservation[]; trips: Trip[]; invoices: Invoice[];
   chargingRequests: ChargingRequest[]; bookings: ParkingBooking[]; sessions: Session[];

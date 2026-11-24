@@ -1,6 +1,7 @@
 {
-  "apiTests": 23,
-  "browserTests": 7,
+  "verifiedOn": "23/11/2026",
+  "apiTests": 35,
+  "browserTests": 9,
   "screens": [
     {
       "title": "Tìm xe và đặt lượt",
@@ -55,7 +56,29 @@
       ]
     },
     {
-      "title": "Giám sát, cảnh báo và sự cố",
+      "title": "Chọn khung sạc khi vượt công suất",
+      "entries": [
+        {
+          "file": "08b-student-charging-conflict.png",
+          "caption": "Student B thử sạc 2 kW trùng với phiên 2 kW của Student A tại Hub giới hạn 3 kW. Giao diện hiển thị lý do và các phương án."
+        },
+        {
+          "file": "08c-student-charging-alternative.png",
+          "caption": "Student B chọn và đặt khung khác. Phiên đã cam kết của Student A được giữ."
+        }
+      ]
+    },
+    {
+      "title": "Dashboard theo Hub",
+      "entries": [
+        {
+          "file": "09-operator-overview.png",
+          "caption": "Operator xem xe khả dụng, mức chiếm dụng bãi, tín hiệu Hub và công suất sạc."
+        }
+      ]
+    },
+    {
+      "title": "Cảnh báo và sự cố",
       "entries": [
         {
           "file": "09b-operator-parking-alert.png",
@@ -63,7 +86,7 @@
         },
         {
           "file": "11-operator-incident.png",
-          "caption": "Operator cô lập cổng sạc và kiểm trạng thái. Ca trình duyệt cũng xác nhận khôi phục."
+          "caption": "Operator cô lập cổng đang sạc. Hệ thống ghi giao dịch bị ảnh hưởng và chờ xác nhận ngắt điện trước khi cho khôi phục."
         }
       ]
     },
@@ -95,6 +118,15 @@
         {
           "file": "14-restart-invoice.png",
           "caption": "Sau khi tiến trình backend được khởi động lại, Student đăng nhập lại và xem đúng hóa đơn từ snapshot. Ca kiểm so lại ID và số tiền với kết quả trước khi dừng."
+        }
+      ]
+    },
+    {
+      "title": "Đối soát khi nạp bản dự phòng",
+      "entries": [
+        {
+          "file": "15-recovery-pending-command.png",
+          "caption": "Operator thấy phiên bản dự phòng và lệnh mở khóa chưa xác định. Chỉ hoàn tất phục hồi sau khi có kết quả đối soát."
         }
       ]
     }

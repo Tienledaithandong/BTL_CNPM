@@ -147,6 +147,27 @@ test('UC16: deterministic 2/1 baseline versus 1/2 when one destination slot is b
   assert.ok(Object.values(neutral.delta).every(value => value === 0 || value === null));
 });
 
+test('UC16: an alternative uses a compatible port and a slot for its full power window', () => {
+  const hour = 60 * 60_000;
+  const network: SimulationNetwork = {
+    capturedAt:now,hubs:[{id:'A',power:3}],vehicles:[],
+    ports:[{id:'C1',hubId:'A',kw:2,connector:'TYPE2',blocked:false},{id:'C2',hubId:'A',kw:2,connector:'TYPE2',blocked:false}],
+    slots:[{id:'P1',hubId:'A',kind:'PRIVATE',occupiedBy:null,blocked:false}],
+    commitments:[{id:'LIVE',hubId:'A',portId:'C1',kw:2,start:now,end:now+2*hour},
+      {id:'PARK',hubId:'A',slotId:'P1',start:now+hour+15*60_000,end:now+hour+30*60_000}],
+  };
+  const demand = {trips:[],charges:[{id:'CH-1',at:now,hubId:'A',kwh:2,connector:'TYPE2',battery:20,neededAt:null}]};
+  const config = {name:'Fixture',hubIds:['A'],hours:1,tripChangePct:0,chargingChangePct:0,unavailablePortPct:0,blockedSlots:0};
+  const result = runWhatIf(network,config,'42',demand);
+  assert.equal(result.scenario.metrics.waitingChargingCount,1);
+  assert.deepEqual(result.recommendations[0].window,{
+    requestId:'CH-1',pointId:'C2',slotId:'P1',startAt:now+hour+30*60_000,endAt:now+3*hour+30*60_000,powerKW:1,energyKWh:2,
+  });
+  const blocked = runWhatIf(network,{...config,unavailablePortPct:100},'42',demand);
+  assert.equal(blocked.recommendations[0].operation,'NoFeasibleCharging');
+  assert.equal(blocked.recommendations[0].window,undefined);
+});
+
 test('UC15/16: captured run remains repeatable when scenario and live vehicle later change', async t => {
   const store = await fixture(t);
   const scenario = await write<Scenario>(store, 'POST ' + scenarios,
@@ -155,10 +176,13 @@ test('UC15/16: captured run remains repeatable when scenario and live vehicle la
   assert.equal(view.status, 'Running');
   assert.equal(view.input, undefined);
   const run = store.snapshot().runs.find(r => r.id === view.id)!;
-  const result = computeSimulation(run);
+  let yielded = false;
+  setImmediate(() => { yielded = true; });
+  const result = await computeSimulation(run);
+  assert.equal(yielded,true);
   await write<Scenario>(store, 'PATCH ' + scenarios + '/:id', { id:scenario.id, version:scenario.version, tripDemandPct:100 });
   await store.write(operator, tx => { tx.state.vehicles[0].batteryPercent = 1; });
-  assert.deepEqual(computeSimulation(store.snapshot().runs.find(r => r.id === run.id)!), result);
+  assert.deepEqual(await computeSimulation(store.snapshot().runs.find(r => r.id === run.id)!), result);
   assert.equal(store.snapshot().vehicles[0].batteryPercent, 1);
 });
 
@@ -214,7 +238,7 @@ test('UC15/16 HTTP: operator reads Completed outcome after worker, queued run be
   assert.equal(received.statusCode, 200, received.body);
   const finished = received.json<{ data:Run }>().data;
   assert.equal(finished.status, 'Completed');
-  assert.equal(finished.finishedAt, now);
+  assert.equal(finished.finishedAt, new Date(now).toISOString());
   assert.ok(finished.result);
   assert.equal(finished.input, undefined);
   const listed = await system.app.inject({ method:'GET', url:'/api/operator/runs', headers });

@@ -10,13 +10,14 @@ const newConfig = (): ScenarioConfig => ({ hubIds:[], durationMinutes:60, tripDe
 const labels: Record<string,string> = {
   servedTrips:'Lượt thuê đáp ứng', rejectedTrips:'Lượt thuê từ chối', peakParkingOccupancy:'Chiếm dụng đỗ cao nhất',
   waitingChargingMinutes:'Tổng phút đợi sạc', meanChargingWait:'Thời gian đợi sạc trung bình',
-  energyDeliveredKWh:'Điện năng đã cấp (kWh)', affectedCount:'Cam kết bị ảnh hưởng',
+  waitingChargingCount:'Yêu cầu sạc còn chờ', energyDeliveredKWh:'Điện năng đã cấp (kWh)', affectedCount:'Cam kết bị ảnh hưởng',
 };
 type Metrics = Record<string,number|null>;
 type Comparison = {
   engineVersion: string; baseline: {metrics:Metrics; rejectedByReason?:Record<string,number>};
   scenario: {metrics:Metrics; rejectedByReason?:Record<string,number>};
-  delta: Metrics; recommendations: Array<{hubId:string;operation:string;detail:string}>;
+  delta: Metrics; recommendations: Array<{hubId:string;operation:string;detail:string;
+    window?: { pointId:string; slotId:string; startAt:number; endAt:number; powerKW:number; energyKWh:number } }>;
   assumptions?: Record<string,unknown>;
 };
 const resultValue = (value: number | null | undefined) => value == null ? '—' : new Intl.NumberFormat('vi-VN',{maximumFractionDigits:3}).format(value);
@@ -35,7 +36,9 @@ function RunCard({ run, hubs, scenarios }: { run: Run; hubs: HubView[]; scenario
         { label:'Chênh lệch', value:(row) => row.delta !== null && row.delta > 0 ? '+'+resultValue(row.delta) : resultValue(row.delta) },
       ]} />
       <h3>Khuyến nghị</h3>
-      {result.recommendations.length ? <ul>{result.recommendations.map((item,i) => <li key={i}><strong>{hubName(hubs,item.hubId)}</strong> · {item.detail}</li>)}</ul> : <p className="muted">Không có thay đổi cần khuyến nghị theo mô hình.</p>}
+      {result.recommendations.length ? <ul>{result.recommendations.map((item,i) => <li key={i}><strong>{hubName(hubs,item.hubId)}</strong> · {item.detail}
+        {item.window && <div>{item.window.pointId} · Chỗ {item.window.slotId} · <DateTime value={item.window.startAt} /> – <DateTime value={item.window.endAt} />
+          {' · '}{resultValue(item.window.powerKW)} kW · {resultValue(item.window.energyKWh)} kWh</div>}</li>)}</ul> : <p className="muted">Không có thay đổi cần khuyến nghị theo mô hình.</p>}
       {result.assumptions && <details><summary>Giả định của lần chạy</summary><ul>{Object.entries(result.assumptions).map(([key,value]) => <li key={key}>{key} · {String(value)}</li>)}</ul></details>}
     </>}
   </Card>;

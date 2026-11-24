@@ -259,12 +259,19 @@ function validInterval(start: number, end: number): boolean {
 
 export function checkWindow(state: State, hubId: string, startAt: number, endAt: number, powerKW: number, excludeSessionId?: string): boolean {
   const hub = state.hubs.find(h => h.id === hubId);
-  if (!hub || !validInterval(startAt, endAt) || !Number.isFinite(powerKW) || powerKW <= 0 || powerKW > hub.powerLimitKW) return false;
-  const existing = state.sessions.filter(s => s.id !== excludeSessionId && s.hubId === hubId
-    && reservesPoint(s) && overlaps(startAt, endAt, s.startAt, endOfPower(s)));
-  const ticks = [startAt, ...existing.map(s => s.startAt).filter(start => start > startAt && start < endAt)];
-  return ticks.every(t => powerKW + existing.filter(s => s.startAt <= t && t < endOfPower(s)).reduce((sum, s) => sum + s.powerKW, 0)
-    <= hub.powerLimitKW + 1e-9);
+  if (!hub) return false;
+  const existing = state.sessions.filter(s => s.id !== excludeSessionId && s.hubId === hubId && reservesPoint(s))
+    .map(s => ({start:s.startAt,end:endOfPower(s),kw:s.powerKW}));
+  return fitsPowerWindow(hub.powerLimitKW,startAt,endAt,powerKW,existing);
+}
+
+export function fitsPowerWindow(limit: number, start: number, end: number, kw: number,
+  windows: ReadonlyArray<{start: number; end: number | null; kw?: number}>): boolean {
+  if (!validInterval(start,end) || !Number.isFinite(kw) || kw <= 0 || kw > limit) return false;
+  const existing = windows.filter(window => overlaps(start,end,window.start,window.end ?? Infinity));
+  const checkpoints = [start, ...existing.map(window => window.start).filter(at => at > start && at < end)];
+  return checkpoints.every(at => kw + existing.reduce((sum, window) =>
+    window.start <= at && at < (window.end ?? Infinity) ? sum + (window.kw ?? 0) : sum, 0) <= limit + 1e-9);
 }
 
 function connector(state: State, s: Pick<Session, 'private' | 'vehicleId'>) {
@@ -874,7 +881,9 @@ export function registerM2(add: AddRoute): void {
     return stopCharging(tx,s,'Stopped');
   });
   add('GET','/operator/overview','OPERATOR',(tx,input) => {
-    const hubs = tx.state.hubs.filter(h => !input.hubId || h.id === input.hubId).map(h => hubSummary(tx.state,h.id,tx.now));
+    const hubs = tx.state.hubs.filter(h => !input.hubId || h.id === input.hubId).map(h => ({
+      ...hubSummary(tx.state,h.id,tx.now),slots:tx.state.slots.filter(slot => slot.hubId===h.id),
+    }));
     const totals = { hubs:hubs.length, availableVehicles:0, availableSlots:0, availablePoints:0, occupiedSlots:0, totalSlots:0, powerInUseKW:0, openAlerts:0 };
     for (const h of hubs) {
       for (const key of ['availableVehicles','availableSlots','availablePoints','occupiedSlots','totalSlots','powerInUseKW','openAlerts'] as const)
