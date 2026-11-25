@@ -3,8 +3,11 @@ import type { FormEvent } from 'react';
 import type { Invoice, ParkingBooking, PrivateVehicle, Session, Notification } from '../api/types';
 import type { HubView, ReservationView, TripView, VehicleView } from './client';
 import { mutate, useAction, useResource } from './client';
-import { Badge, Card, Circuit, DateTime, Empty, Field, Icon, Stat, money } from './ui';
+import { Badge, Card, DateTime, Empty, Field, Icon, Stat, money } from './ui';
 import { Button, DataTable, Feedback, HubField, ResourceStatus, hubName, isoInput, localInput } from './components';
+import { CapacityMeter, HubStatus, NetworkMap, hubCondition } from './hubs';
+import originIcon from './assets/trip-origin.svg';
+import destinationIcon from './assets/trip-destination.svg';
 
 export type StudentPage = 'map' | 'rides' | 'parking' | 'charging' | 'history';
 type PageProps = { revision: number; refresh: () => void };
@@ -30,33 +33,43 @@ export function StudentMap({ revision, refresh, onBooked }: PageProps & { onBook
   );
   const currentVehicle = (vehicles.data ?? []).find((vehicle) => vehicle.id === selectedVehicle);
   return <>
-    <section className="hero-card"><div><h2>Di chuyển trong khu đô thị ĐHQG-HCM</h2><p>Chọn hub để xem xe, chỗ đỗ và cổng sạc đang khả dụng.</p></div><Circuit /></section>
     <ResourceStatus resources={[hubs, vehicles]} />
     <Feedback feedback={action.feedback} />
-    <div className="stats">
-      <Stat label="Hub trong mạng lưới" icon="map" value={rows.length} />
-      <Stat label="Xe có thể đặt" icon="bike" value={rows.reduce((sum, hub) => sum + hub.availableVehicles, 0)} />
-      <Stat label="Chỗ đỗ khả dụng" icon="parking" value={rows.reduce((sum, hub) => sum + hub.availableSlots, 0)} />
+    <div className="student-map-layout">
+      <div className="stack map-sidebar">
+        <Card className="student-filters">
+          <div className="route-field"><img src={originIcon} alt="" />
+            <input type="search" aria-label="Tên hub hoặc mã xe" placeholder="Tìm Hub hoặc mã xe" value={filter} onChange={event => setFilter(event.target.value)} />
+          </div>
+          <label className="route-field"><span className="sr-only">Loại xe</span>
+            <select value={vehicleType} onChange={event => setVehicleType(event.target.value)}><option value="">Tất cả loại xe</option>{types.map(type => <option key={type}>{type}</option>)}</select>
+          </label>
+        </Card>
+        {currentVehicle && <Card title={`Đặt xe ${currentVehicle.id}`} subtitle={`Nhận tại ${hubName(rows, currentVehicle.hubId)}.`} className="student-booking" extra={<Button compact onClick={() => setSelectedVehicle('')}>Đóng</Button>}>
+          <form className="stack" onSubmit={(event) => submit(event, () => {
+            void action.run(() => mutate<ReservationView>('/reservations', { vehicleId:currentVehicle.id, destinationHubId:destination }), 'Đặt xe và giữ chỗ đích thành công.').then(reservation => { if (reservation) onBooked(); });
+          })}>
+            <div className="destination-field"><img src={destinationIcon} alt="" /><HubField hubs={rows} label="Hub trả xe" value={destination} onChange={setDestination} /></div>
+            <Button type="submit" tone="primary" disabled={action.busy || !currentVehicle.eligible || !destination}>Xác nhận đặt và giữ chỗ</Button>
+          </form>
+        </Card>}
+        <div className="stats student-stats">
+          <Stat label="Xe khả dụng" value={hubs.data ? rows.reduce((sum, hub) => sum + hub.availableVehicles, 0) : '—'} />
+          <Stat label="Chỗ đỗ trống" value={hubs.data ? rows.reduce((sum, hub) => sum + hub.availableSlots, 0) : '—'} />
+          <Stat label="Cổng sạc rảnh" value={hubs.data ? rows.reduce((sum, hub) => sum + hub.availablePoints, 0) : '—'} />
+        </div>
+        <div className="row between"><h2>Các Hub trong mạng lưới</h2><button type="button" className="text-button" onClick={() => { setSelectedHub(''); setFilter(''); setVehicleType(''); }}>Xem tất cả</button></div>
+        {filteredHubs.map(hub => <Card key={hub.id} className={`student-hub student-hub-${hubCondition(hub)}`} extra={<>
+          <button className="hub-title" aria-pressed={selectedHub === hub.id} type="button" onClick={() => setSelectedHub(hub.id)}>{hub.name}</button>
+          <HubStatus hub={hub} />
+        </>}>
+          <p className="small muted">{hub.availableVehicles} xe khả dụng</p>
+          <CapacityMeter label="Chỗ đỗ" used={hub.stale ? null : hub.occupiedSlots} capacity={hub.totalSlots} />
+          <CapacityMeter label="Công suất đang dùng (kW)" used={hub.stale ? null : hub.powerInUseKW} capacity={hub.powerLimitKW} />
+        </Card>)}
+      </div>
+      <NetworkMap hubs={rows} selected={selectedHub} onSelect={setSelectedHub} />
     </div>
-    <Card title="Tìm hub và xe">
-      <div className="row">
-        <Field label="Tên hub hoặc mã xe"><input type="search" value={filter} onChange={(event) => setFilter(event.target.value)} /></Field>
-        <Field label="Loại xe"><select value={vehicleType} onChange={(event) => setVehicleType(event.target.value)}><option value="">Tất cả loại xe</option>{types.map((type) => <option value={type} key={type}>{type}</option>)}</select></Field>
-      </div>
-      <div className="switcher" aria-label="Lọc xe theo hub">
-        <button type="button" className={`button compact ${selectedHub ? '' : 'primary'}`} aria-pressed={!selectedHub} onClick={() => setSelectedHub('')}>Tất cả hub</button>
-        {filteredHubs.map((hub) => <button type="button" className={`button compact ${selectedHub === hub.id ? 'primary' : ''}`} key={hub.id} aria-pressed={selectedHub === hub.id} onClick={() => setSelectedHub(hub.id)}>{hub.name} · {hub.availableVehicles} xe</button>)}
-      </div>
-      {currentHub && <p className="card-sub">{currentHub.availableSlots} chỗ đỗ · {currentHub.availablePoints} cổng sạc khả dụng · Cập nhật <DateTime value={currentHub.lastSeenAt} /></p>}
-    </Card>
-    {currentVehicle && <Card title={`Đặt xe ${currentVehicle.id}`} subtitle={`Nhận tại ${hubName(rows, currentVehicle.hubId)}. Giữ xe và chỗ đỗ đích trong cùng một lượt đặt.`} extra={<Button onClick={() => setSelectedVehicle('')}>Đóng</Button>}>
-      <form className="stack" onSubmit={(event) => submit(event, () => {
-        void action.run(() => mutate<ReservationView>('/reservations', { vehicleId: currentVehicle.id, destinationHubId: destination }), 'Đặt xe và giữ chỗ đích thành công.').then((reservation) => { if (reservation) onBooked(); });
-      })}>
-        <HubField hubs={rows} label="Hub trả xe" value={destination} onChange={setDestination} />
-        <div className="actions"><Button type="submit" tone="primary" disabled={action.busy || !currentVehicle.eligible || !destination}>Xác nhận đặt và giữ chỗ</Button></div>
-      </form>
-    </Card>}
     <Card title={currentHub ? `Xe tại ${currentHub.name}` : 'Xe trong mạng lưới'} extra={<span className="small muted">{filteredVehicles.length} kết quả</span>}>
       <DataTable rows={filteredVehicles} label="Các xe ở hub" empty="Không có xe khớp điều kiện tìm kiếm." columns={[
         { label:'Xe', value:(vehicle) => <><strong>{vehicle.id}</strong><div className="small muted">{vehicle.type}</div></> },
@@ -64,7 +77,10 @@ export function StudentMap({ revision, refresh, onBooked }: PageProps & { onBook
         { label:'Pin', value:(vehicle) => vehicle.batteryPercent === null ? 'Chưa xác định' : <div className="stack"><strong className="tabular">{vehicle.batteryPercent}%</strong><div className="meter" aria-hidden="true"><span style={{ width: `${vehicle.batteryPercent}%` }} /></div></div> },
         { label:'Cập nhật', value:(vehicle) => <DateTime value={vehicle.observedAt} /> },
         { label:'Trạng thái', value:(vehicle) => <><Badge value={vehicle.mobilityStatus} />{!vehicle.eligible && vehicle.reason && <div className="small muted">{vehicle.reason}</div>}</> },
-        { label:'Thao tác', value:(vehicle) => <Button compact disabled={!vehicle.eligible} onClick={() => { setSelectedVehicle(vehicle.id); setDestination(''); document.getElementById('workspace')?.scrollIntoView({ block:'start' }); }}>Đặt xe</Button> },
+        { label:'Thao tác', value:(vehicle) => <Button compact disabled={!vehicle.eligible} onClick={() => {
+          setSelectedVehicle(vehicle.id); setDestination('');
+          requestAnimationFrame(() => document.querySelector<HTMLSelectElement>('.student-booking select')?.focus());
+        }}>Đặt xe</Button> },
       ]} />
     </Card>
   </>;

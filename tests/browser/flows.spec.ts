@@ -14,12 +14,16 @@ async function login(page: Page, role: DemoRole) {
   await page.goto('/');
   await page.getByRole('button',{name:role==='student' ? /Sinh viên A/ : /Điều phối viên/}).click();
   await page.getByRole('button',{name:'Vào hệ thống'}).click();
-  await expect(page.getByRole('heading',{name:role==='student'?'Hub và xe':'Tổng quan',exact:true})).toBeVisible();
+  await expect(page.getByRole('heading',{name:role==='student'?'Hub và xe':'Giám sát mạng lưới',exact:true})).toBeVisible();
   await expect(page.getByText('Đang kết nối',{exact:true})).toBeVisible();
 }
 async function nav(page: Page, name: string) {
+  const headings: Record<string,string> = {
+    'Tổng quan':'Giám sát mạng lưới', 'Cảnh báo':'Trung tâm cảnh báo', 'Sự cố':'Sự cố & phiếu bảo trì',
+    'Điều phối xe':'Điều phối phương tiện', 'Lịch sạc':'Lịch sạc thông minh', 'Mô phỏng What-if':'Kịch bản & Mô phỏng',
+  };
   await page.getByRole('navigation').getByRole('button',{name,exact:true}).click();
-  await expect(page.getByRole('heading',{name,exact:true,level:1})).toBeVisible();
+  await expect(page.getByRole('heading',{name:headings[name] ?? name,exact:true,level:1})).toBeVisible();
 }
 async function reset(page: Page) {
   const result = await page.request.post('/api/operator/demo/events',{data:{kind:'reset',confirm:true}});
@@ -211,6 +215,7 @@ test('operator checks overview, redistributes one vehicle, handles incident, and
   await expect(page.getByText('Đã ghi nhận kết quả phục hồi.')).toBeVisible();
 
   await nav(page,'Mô phỏng What-if');
+  await page.getByRole('button',{name:'Tạo kịch bản mới',exact:true}).click();
   await page.getByLabel('Tên kịch bản').fill('Tăng nhu cầu 25% từ Ga Metro');
   await page.getByRole('checkbox',{name:'Ga Metro',exact:true}).check();
   await page.getByRole('checkbox',{name:'Ký túc xá',exact:true}).check();
@@ -225,7 +230,6 @@ test('operator checks overview, redistributes one vehicle, handles incident, and
   const firstScenario = scenarioTable.getByRole('row').filter({hasText:'SC-001'});
   await saveScenario.click();
   await expect(firstScenario).toContainText('Tăng nhu cầu 25% từ Ga Metro');
-  await page.getByRole('button',{name:'Tạo kịch bản khác'}).click();
   await firstScenario.getByRole('button',{name:'Chỉnh sửa'}).click();
   await expect(page.getByLabel('Tỷ lệ cổng sạc khả dụng (%)')).toHaveValue('80');
   await expect(page.getByLabel('Số chỗ đỗ không khả dụng tại Ga Metro')).toHaveValue('2');
@@ -233,7 +237,7 @@ test('operator checks overview, redistributes one vehicle, handles incident, and
   await page.getByLabel('Tên kịch bản').fill('Tăng nhu cầu ở hai Hub');
   await saveScenario.click();
   await expect(firstScenario).toContainText('Tăng nhu cầu ở hai Hub');
-  await page.getByRole('button',{name:'Tạo kịch bản khác'}).click();
+  await page.getByRole('button',{name:'Tạo kịch bản mới',exact:true}).click();
   await page.getByLabel('Tên kịch bản').fill('Chỉ mô phỏng Ga Metro');
   await page.getByRole('checkbox',{name:'Ga Metro',exact:true}).check();
   await saveScenario.click();

@@ -1,36 +1,45 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { Account } from './client';
+import type { Alert, Notification } from '../api/types';
+import type { Account, HubView, VehicleView } from './client';
 import { ApiError, api, errorText, mutate, resetRetryState, useConnection, useResource } from './client';
 import { Button, Feedback } from './components';
-import { Badge, Brand, Circuit, Icon } from './ui';
-import type { IconName } from './ui';
+import { Brand, Icon } from './ui';
 import { StudentMap, StudentRides, StudentParking, StudentCharging, StudentHistory } from './student';
 import type { StudentPage } from './student';
 import { OperatorOverview, OperatorAlerts, OperatorIncidents, OperatorRedistribution, OperatorPlans } from './operator';
 import type { OperatorPage } from './operator';
 import { OperatorScenarios } from './scenarios';
 import { OperatorDemo } from './demo';
+import operatorAlert from './assets/operator-alert.svg';
+import studentAlert from './assets/student-alert.svg';
+import navDot from './assets/operator-nav.svg';
+import activeNavDot from './assets/operator-nav-active.svg';
+import searchDot from './assets/operator-search.svg';
+import liveDot from './assets/live-dot.svg';
+import welcomeHalo from './assets/welcome-halo.svg';
+import welcomeWheel from './assets/welcome-wheel.svg';
+import welcomeStem from './assets/welcome-stem.svg';
 import './style.css';
 
 type Page = StudentPage | OperatorPage;
-type PageLink = { id:Page; label:string; description:string; icon:IconName };
+type PageLink = { id: Page; label: string; title?: string; description?: string };
 const studentPages: PageLink[] = [
-  { id:'map', label:'Hub và xe', description:'Tìm điểm nhận xe và chọn chỗ trả trong mạng lưới.', icon:'map' },
-  { id:'rides', label:'Chuyến đi', description:'Xem lượt đặt, nhận xe và xác nhận trả xe.', icon:'bike' },
-  { id:'parking', label:'Đỗ xe cá nhân', description:'Đặt chỗ theo khung giờ hoặc theo lịch lặp.', icon:'parking' },
-  { id:'charging', label:'Sạc xe', description:'Yêu cầu sạc xe dùng chung hoặc đặt lịch cho xe cá nhân.', icon:'plug' },
-  { id:'history', label:'Lịch sử của tôi', description:'Xem thông báo, lượt đặt xe, chuyến đi và hóa đơn.', icon:'calendar' },
+  { id:'map', label:'Hub và xe', description:'Tìm điểm nhận xe và chọn chỗ trả trong mạng lưới.' },
+  { id:'rides', label:'Chuyến đi', description:'Xem lượt đặt, nhận xe và xác nhận trả xe.' },
+  { id:'parking', label:'Đỗ xe cá nhân', description:'Đặt chỗ theo khung giờ hoặc theo lịch lặp.' },
+  { id:'charging', label:'Sạc xe', description:'Yêu cầu sạc xe dùng chung hoặc đặt lịch cho xe cá nhân.' },
+  { id:'history', label:'Lịch sử của tôi', description:'Xem thông báo, lượt đặt xe, chuyến đi và hóa đơn.' },
 ];
 const operatorPages: PageLink[] = [
-  { id:'overview', label:'Tổng quan', description:'Theo dõi khả dụng của các hub và tài nguyên.', icon:'dashboard' },
-  { id:'alerts', label:'Cảnh báo', description:'Theo dõi và tiếp nhận cảnh báo từ hệ thống.', icon:'bell' },
-  { id:'incidents', label:'Sự cố', description:'Ghi nhận, cô lập và phục hồi tài nguyên.', icon:'alert' },
-  { id:'redistribution', label:'Điều phối xe', description:'Lập và theo dõi lệnh chuyển xe giữa các hub.', icon:'route' },
-  { id:'plans', label:'Lịch sạc', description:'Kiểm tra công suất và thứ tự ưu tiên trước khi áp dụng lịch.', icon:'calendar' },
-  { id:'scenarios', label:'Mô phỏng What-if', description:'So sánh các kịch bản với bản chụp mạng lưới.', icon:'chart' },
-  { id:'demo', label:'Điều khiển demo', description:'Gửi tín hiệu thiết bị và đặt lại dữ liệu trình diễn.', icon:'sliders' },
+  { id:'overview', label:'Tổng quan', title:'Giám sát mạng lưới' },
+  { id:'alerts', label:'Cảnh báo', title:'Trung tâm cảnh báo' },
+  { id:'incidents', label:'Sự cố', title:'Sự cố & phiếu bảo trì' },
+  { id:'redistribution', label:'Điều phối xe', title:'Điều phối phương tiện' },
+  { id:'plans', label:'Lịch sạc', title:'Lịch sạc thông minh' },
+  { id:'scenarios', label:'Mô phỏng What-if', title:'Kịch bản & Mô phỏng' },
+  { id:'demo', label:'Điều khiển demo' },
 ];
 const accounts = [
   { id:'STUDENT_A', name:'Sinh viên A' },
@@ -38,6 +47,21 @@ const accounts = [
   { id:'OPERATOR_A', name:'Điều phối viên' },
 ];
 const nameOf = (id: string) => accounts.find((entry) => entry.id===id)?.name ?? id;
+
+function WelcomeArt() {
+  return <svg className="welcome-art" viewBox="0 0 591.5 354.9" aria-hidden="true">
+    <rect width="591.5" height="354.9" fill="var(--brand-tint)" />
+    <image href={welcomeHalo} x="202.8" y="-101.4" width="338" height="338" />
+    <rect y="287.3" width="591.5" height="67.6" fill="#3b82f6" opacity=".15" />
+    <image href={welcomeWheel} x="118.3" y="219.7" width="74.36" height="74.36" />
+    <image href={welcomeWheel} x="338" y="219.7" width="74.36" height="74.36" />
+    <rect x="169" y="239.98" width="253.5" height="23.66" rx="11.83" fill="var(--brand)" />
+    <image href={welcomeStem} x="392.92" y="114.07" width="33.8017" height="130.132" />
+    <rect x="368.42" y="111.54" width="64.22" height="10.14" rx="5.07" fill="var(--brand-dark)" />
+    <rect x="503.62" y="98.02" width="60.84" height="189.28" rx="16.9" fill="white" />
+    <rect x="517.14" y="118.3" width="33.8" height="43.94" rx="6.76" fill="#16a34a" />
+  </svg>;
+}
 
 function Login({ onLogin }: { onLogin:(value:Account)=>void }) {
   const [userId, setUserId] = useState('STUDENT_A');
@@ -56,10 +80,10 @@ function Login({ onLogin }: { onLogin:(value:Account)=>void }) {
     finally { setPending(false); }
   }
   return <main className="login">
-    <section className="login-message"><Brand/><div><h1>Di chuyển xanh trong khu đô thị.</h1><p>Tìm xe, đặt chỗ và sạc tại các hub trong khu đô thị ĐHQG-HCM.</p></div>
-      <small>ĐHQG-HCM · Môi trường trình diễn</small><Circuit /></section>
+    <header className="login-header"><Brand /><a className="button" href="#login-heading">Đăng nhập</a></header>
+    <section className="login-message"><div><h1>Tìm xe điện &amp; Hub gần bạn trong vài giây</h1><p>Tra cứu xe, giữ chỗ 15 phút và trả xe dễ dàng trong khu đô thị ĐHQG-HCM.</p></div><WelcomeArt /></section>
     <section className="login-panel" aria-labelledby="login-heading"><div className="login-panel-inner">
-      <div><h2 id="login-heading">Đăng nhập</h2><p className="muted">Chọn tài khoản để mở giao diện trình diễn.</p></div>
+      <div><h2 id="login-heading" tabIndex={-1}>Đăng nhập</h2><p className="muted">Chọn tài khoản để vào hệ thống.</p></div>
       <div className="stack" aria-label="Tài khoản demo">
         {accounts.map((entry) => <button className="demo-choice" key={entry.id} type="button" aria-pressed={userId===entry.id} onClick={() => { setUserId(entry.id); setPassword('demo'); }}>
           <span>{entry.name}</span><span className="small">{entry.id}</span>
@@ -75,15 +99,43 @@ function Login({ onLogin }: { onLogin:(value:Account)=>void }) {
   </main>;
 }
 
+function OperatorSearch({ revision, onSelect }: { revision: number; onSelect: (hubId: string) => void }) {
+  const [search, setSearch] = useState('');
+  const query = search.trim().toLocaleLowerCase('vi');
+  const hubs = useResource<HubView[]>(query ? '/hubs' : null, revision);
+  const vehicles = useResource<VehicleView[]>(query ? '/vehicles' : null, revision);
+  const results = query ? [
+    ...(hubs.data ?? []).flatMap(hub => [{ key: hub.id, text: hub.name, hubId: hub.id },
+      ...(hub.points ?? []).map(point => ({ key: point.id, text: `${point.id} · ${hub.name}`, hubId: hub.id }))]),
+    ...(vehicles.data ?? []).flatMap(vehicle => vehicle.hubId ? [{ key: vehicle.id, text: `${vehicle.id} · ${vehicle.type}`, hubId: vehicle.hubId }] : []),
+  ].filter(({key,text}) => `${key} ${text}`.toLocaleLowerCase('vi').includes(query)).slice(0,8) : [];
+  return <form className="header-search" role="search" onSubmit={event => {
+    event.preventDefault();
+    if (results.length) { onSelect(results[0].hubId); setSearch(''); }
+  }} onKeyDown={event => { if (event.key === 'Escape') setSearch(''); }}>
+    <img src={searchDot} alt="" />
+    <input type="search" aria-label="Tìm Hub, xe hoặc cổng sạc" placeholder="Tìm Hub, xe, trụ sạc…" value={search} onChange={event => setSearch(event.target.value)} />
+    {query && <div className="header-search-results">
+      {results.map(item => <button key={item.key} type="button" onClick={() => { onSelect(item.hubId); setSearch(''); }}>{item.text}</button>)}
+      {!results.length && <p className="small muted">{hubs.pending || vehicles.pending ? 'Đang tìm…' : 'Không tìm thấy kết quả.'}</p>}
+    </div>}
+  </form>;
+}
+
 function Workspace({ account, onLogout }: { account:Account; onLogout:()=>void }) {
   const operator = account.role === 'OPERATOR';
   const links = operator ? operatorPages : studentPages;
   const [page, setPage] = useState<Page>(() => links.find((link) => link.id===new URLSearchParams(window.location.search).get('view'))?.id ?? links[0].id);
   const [revision, setRevision] = useState(0);
+  const [focusHub, setFocusHub] = useState('');
   const [logoutError, setLogoutError] = useState('');
   const refresh = useCallback(() => setRevision((value) => value+1), []);
   const connected = useConnection(true,refresh);
   const health = useResource<{status:string}>('/ready',revision);
+  const alerts = useResource<Alert[]>(operator ? '/operator/alerts' : null, revision);
+  const notifications = useResource<Notification[]>(operator ? null : '/me/notifications', revision);
+  const alertCount = alerts.data?.filter(alert => alert.status === 'Open' && !alert.acknowledgedAt).length ?? 0;
+  const hasUpdates = operator ? alertCount > 0 : notifications.data?.some(item => item.readAt === null);
   const activeLink = links.find((link) => link.id===page) ?? links[0];
 
   function navigate(id:Page) {
@@ -109,36 +161,44 @@ function Workspace({ account, onLogout }: { account:Account; onLogout:()=>void }
     case 'parking':content=<StudentParking {...props} />;break;
     case 'charging':content=<StudentCharging {...props} />;break;
     case 'history':content=<StudentHistory {...props} />;break;
-    case 'overview':content=<OperatorOverview {...props} />;break;
+    case 'overview':content=<OperatorOverview {...props} alerts={alerts.data ?? []} selectedHub={focusHub} onSelectHub={setFocusHub} onAlerts={() => navigate('alerts')} />;break;
     case 'alerts':content=<OperatorAlerts {...props} />;break;
     case 'incidents':content=<OperatorIncidents {...props} />;break;
     case 'redistribution':content=<OperatorRedistribution {...props} />;break;
     case 'plans':content=<OperatorPlans {...props} />;break;
-    case 'scenarios':content=<OperatorScenarios {...props} />;break;
+    case 'scenarios':content=<OperatorScenarios {...props} onNavigate={navigate} />;break;
     case 'demo':content=<OperatorDemo {...props} />;break;
   }
+  const navigation = <nav className="side-nav" aria-label={operator ? 'Điều hướng vận hành' : 'Điều hướng sinh viên'}>
+    {links.map(link => <button type="button" key={link.id} aria-current={activeLink.id === link.id ? 'page' : undefined} className="side-link" onClick={() => navigate(link.id)}>
+      {operator && <img src={activeLink.id === link.id ? activeNavDot : navDot} alt="" />}{link.label}
+      {link.id === 'alerts' && alertCount > 0 && <span className="nav-count" aria-hidden="true">{alertCount}</span>}
+    </button>)}
+  </nav>;
   return <>
     <a className="skip" href="#workspace">Đến nội dung chính</a>
-    <header className="app-header"><Brand/>
-      <div className="header-actions">
-        <span className={`badge ${connected ? 'ok' : 'warn'}`}>{connected ? 'Đang kết nối' : 'Đang đồng bộ lại'}</span>
-        <span className="user-name">{nameOf(account.id)}</span>
-        <Button compact onClick={() => { void logout(); }}><Icon name="exit" size={15} />Đăng xuất</Button>
-      </div>
-    </header>
-    <div className="shell">
-      <aside className="sidebar">
-        <span className="side-label">{operator ? 'Vận hành' : 'Sinh viên'}</span>
-        <nav className="side-nav" aria-label={operator ? 'Điều hướng vận hành' : 'Điều hướng sinh viên'}>
-          {links.map((link) => <button type="button" key={link.id} aria-current={activeLink.id===link.id ? 'page' : undefined} className="side-link" onClick={() => navigate(link.id)}><Icon name={link.icon}/>{link.label}</button>)}
-        </nav>
-        <div className="sidebar-note">Dữ liệu mô phỏng · ĐHQG-HCM</div>
-      </aside>
-      <main className="workspace" id="workspace" tabIndex={-1}>
-        <div className="page-heading"><div><div className="eyebrow">{operator ? 'Vận hành' : 'Sinh viên'}</div>
-          <h1 id="page-title" tabIndex={-1}>{activeLink.label}</h1><p className="page-description">{activeLink.description}</p></div>
-          <Button compact onClick={refresh}><Icon name="refresh" size={16}/>Tải lại</Button>
+    <div className={`shell ${operator ? 'operator-shell' : 'student-shell'}`}>
+      {operator && <aside className="sidebar"><div className="sidebar-inner"><Brand operator />{navigation}</div></aside>}
+      <header className="app-header">
+        {operator ? <><h1 id="page-title" tabIndex={-1}>{activeLink.title ?? activeLink.label}</h1>
+          <OperatorSearch revision={revision} onSelect={id => { setFocusHub(id); navigate('overview'); }} /></> : <><Brand />{navigation}</>}
+        <div className="header-actions">
+          <span className={`badge connection ${connected ? 'ok' : 'warn'}`}>{connected && <img src={liveDot} alt="" />}{connected ? 'Đang kết nối' : 'Đang đồng bộ lại'}</span>
+          <button type="button" className="header-alert" aria-label={operator ? 'Mở trung tâm cảnh báo' : 'Mở thông báo'} onClick={() => navigate(operator ? 'alerts' : 'history')}>
+            {hasUpdates ? <img src={operator ? operatorAlert : studentAlert} alt="" /> : <Icon name="bell" size={20} />}
+          </button>
+          <details className="account-menu"><summary aria-label={`Tài khoản ${nameOf(account.id)}`}><span className="avatar" aria-hidden="true">{operator ? 'OP' : 'SV'}</span><span className="user-name">{nameOf(account.id)}</span></summary>
+            <div className="account-actions">
+              <Button compact onClick={refresh}><Icon name="refresh" size={16} />Tải lại</Button>
+              <Button compact onClick={() => { void logout(); }}><Icon name="exit" size={15} />Đăng xuất</Button>
+            </div>
+          </details>
         </div>
+      </header>
+      <main className={`workspace workspace-${page}`} id="workspace" tabIndex={-1}>
+        {!operator && <div className={`page-heading ${page === 'map' ? 'map-page-heading' : ''}`}><div>
+          <h1 id="page-title" tabIndex={-1}>{activeLink.label}</h1><p className="page-description">{activeLink.description}</p>
+        </div></div>}
         {health.error && <Feedback feedback={{kind:'error',text:health.error}}/>}
         {logoutError && <Feedback feedback={{kind:'error',text:logoutError}}/>}
         {content}

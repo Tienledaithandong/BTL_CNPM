@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import type { Alert, ChargingPlan, Command, Incident, Order, Point, Run, Scenario, ScenarioConfig, Slot } from '../api/types';
+import type { Alert, ChargingPlan, Command, Incident, Order, Point, Slot } from '../api/types';
 import type { HubView, VehicleView } from './client';
 import { mutate, useAction, useResource } from './client';
-import { Badge, Card, Circuit, DateTime, Empty, Field, Icon, Stat } from './ui';
+import { Badge, Card, DateTime, Empty, Field, Stat } from './ui';
 import { Button, DataTable, Feedback, HubField, ResourceStatus, hubName } from './components';
+import { CapacityMeter, HubStatus, NetworkMap } from './hubs';
 
 export type OperatorPage = 'overview' | 'alerts' | 'incidents' | 'redistribution' | 'plans' | 'scenarios' | 'demo';
 type PageProps = { revision: number; refresh: () => void };
@@ -14,44 +15,55 @@ type HubOverview = Omit<HubView, 'points'> & {
   occupiedSlots: number; totalSlots: number; parkingOccupancyPct: number | null; powerInUseKW: number; stale: boolean;
   openAlerts: number; slots: Slot[]; points: Array<Point & { occupancy: string; activeSessionId: string | null }>;
 };
-type Overview = { hubs: HubOverview[]; totals: Partial<Omit<HubOverview, keyof HubView | 'points'>> & Partial<Pick<HubView,'availableVehicles'|'availableSlots'|'availablePoints'>> };
-const sum = (hubs: HubOverview[], key: 'availableVehicles' | 'availableSlots' | 'availablePoints' | 'openAlerts' | 'occupiedSlots' | 'totalSlots') => hubs.reduce((total, hub) => total + (hub[key] ?? 0), 0);
+type Overview = { hubs: HubOverview[] };
+const sum = (hubs: HubView[], key: 'availableVehicles' | 'openAlerts' | 'occupiedSlots' | 'totalSlots' | 'powerInUseKW') => hubs.reduce((total, hub) => total + hub[key], 0);
+const alertLabel = (item: Alert) => item.type === 'PARKING' ? 'Chiếm dụng bãi đỗ' : 'Hết cổng sạc khả dụng';
 
-export function OperatorOverview({ revision }: PageProps) {
+export function OperatorOverview({ revision, alerts, selectedHub, onSelectHub, onAlerts }: Pick<PageProps, 'revision'> & {
+  alerts: Alert[]; selectedHub: string; onSelectHub: (id: string) => void; onAlerts: () => void;
+}) {
   const overview = useResource<Overview>('/operator/overview', revision);
   const hubs = overview.data?.hubs ?? [];
+  const current = hubs.find(hub => hub.id === selectedHub) ?? hubs[0];
+  const online = hubs.filter(hub => !hub.stale);
+  const totalSlots = sum(online, 'totalSlots');
+  const open = alerts.filter(alert => alert.status === 'Open');
   return <>
-    <section className="hero-card"><div><h2>Trạng thái mạng lưới</h2><p>Theo dõi xe, chỗ đỗ, công suất sạc và tình trạng nhận tín hiệu của từng hub.</p></div><Circuit /></section>
     <ResourceStatus resources={[overview]} />
-    <div className="stats">
-      <Stat icon="bike" label="Xe có thể cấp phát" value={sum(hubs,'availableVehicles')} />
-      <Stat icon="parking" label="Chỗ đỗ đang sử dụng" value={`${sum(hubs,'occupiedSlots')} / ${sum(hubs,'totalSlots')}`} />
-      <Stat icon="alert" label="Cảnh báo đang mở" value={sum(hubs,'openAlerts')} />
+    <div className="stats dashboard-stats">
+      <Stat label="Xe khả dụng" value={overview.data ? sum(hubs,'availableVehicles') : '—'} />
+      <Stat label="Chiếm dụng bãi đỗ" value={totalSlots ? `${Math.round(sum(online,'occupiedSlots') / totalSlots * 100)}%` : '—'}
+        hint={totalSlots ? `${sum(online,'occupiedSlots')}/${totalSlots} chỗ đang dùng` : undefined} />
+      <Stat label="Công suất sạc đang dùng" value={overview.data ? `${sum(hubs,'powerInUseKW').toLocaleString('vi-VN')} kW` : '—'} />
+      <Stat label="Cảnh báo đang mở" value={overview.data ? sum(hubs,'openAlerts') : '—'} tone={open.length ? 'error' : undefined} />
     </div>
-    <div className="triple">
-      {hubs.map((hub) => <Card key={hub.id} title={hub.name} extra={<Badge value={hub.stale ? 'Stale' : 'Healthy'} />}>
-        <dl className="details">
-          <dt>Xe khả dụng</dt><dd>{hub.availableVehicles}</dd>
-          <dt>Chỗ đỗ xe chung</dt><dd>{hub.availableSlots} chỗ khả dụng</dd>
-          <dt>Chiếm dụng vật lý</dt><dd>{hub.occupiedSlots}/{hub.totalSlots}{hub.parkingOccupancyPct !== null && hub.parkingOccupancyPct !== undefined ? ` · ${hub.parkingOccupancyPct.toFixed(1)}%` : ''}</dd>
-          <dt>Công suất</dt><dd>{hub.powerInUseKW.toFixed(1)} / {hub.powerLimitKW} kW</dd>
-          <dt>Tín hiệu gần nhất</dt><dd><DateTime value={hub.lastSeenAt} /></dd>
-        </dl>
-        <div className="meter" role="progressbar" aria-label={`Chiếm dụng ${hub.name}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={hub.parkingOccupancyPct ?? undefined}>
-          <span style={{ width: `${Math.max(0,Math.min(100,hub.parkingOccupancyPct ?? 0))}%` }} />
-        </div>
-        <hr className="divider"/>
-        <h3>{hub.availablePoints} cổng sạc khả dụng</h3>
-        {hub.points?.map((point) => <div className="row between" key={point.id}><span className="small">{point.id} · {point.ratedKW} kW</span><Badge value={point.blocked ? 'Blocked' : point.occupancy} /></div>)}
-        <details><summary>Chi tiết vị trí đỗ</summary>
-          <DataTable rows={hub.slots} label={`Vị trí đỗ ${hub.name}`} empty="Hub chưa có vị trí đỗ." columns={[
-            {label:'Vị trí',value:slot => slot.id},
-            {label:'Xe hiện diện',value:slot => slot.vehicleId ?? '—'},
-            {label:'Trạng thái vật lý',value:slot => <Badge value={slot.blocked ? 'Blocked' : slot.vehicleId ? 'Occupied' : 'Empty'} />},
-          ]}/>
-        </details>
-      </Card>)}
+    <div className="dashboard-grid">
+      <NetworkMap hubs={hubs} selected={selectedHub} onSelect={onSelectHub} />
+      <div className="stack dashboard-aside">
+        <Card title="Cảnh báo đang mở" extra={<span className="count-chip">{open.length}</span>}>
+          {open.length ? open.map(alert => <button className="dashboard-alert" type="button" key={alert.id} onClick={onAlerts}>
+            <strong>{hubName(hubs,alert.hubId)}</strong><span>{alertLabel(alert)} · <DateTime value={alert.openedAt} /></span>
+          </button>) : <p className="muted small">Không có cảnh báo đang mở.</p>}
+        </Card>
+        {current && <Card key={current.id} title={current.name} extra={<HubStatus hub={current} />}>
+          <CapacityMeter label="Chỗ đỗ" used={current.stale ? null : current.occupiedSlots} capacity={current.totalSlots} />
+          <CapacityMeter label="Công suất sạc đang dùng (kW)" used={current.stale ? null : current.powerInUseKW} capacity={current.powerLimitKW} />
+          <p className="small muted">{current.availableVehicles} xe · {current.availableSlots} chỗ đỗ xe chung · {current.availablePoints} cổng sạc khả dụng</p>
+          <p className="small muted">Tín hiệu gần nhất <DateTime value={current.lastSeenAt} /></p>
+          <details><summary>Chi tiết cổng sạc</summary>{current.points.map(point => <div className="row between" key={point.id}><span className="small">{point.id} · {point.ratedKW} kW</span><Badge value={point.blocked ? 'Blocked' : point.occupancy} /></div>)}</details>
+          <details><summary>Chi tiết vị trí đỗ</summary>
+            <DataTable rows={current.slots} label={`Vị trí đỗ ${current.name}`} empty="Hub chưa có vị trí đỗ." columns={[
+              {label:'Vị trí',value:slot => slot.id},
+              {label:'Xe hiện diện',value:slot => slot.vehicleId ?? '—'},
+              {label:'Trạng thái vật lý',value:slot => <Badge value={slot.blocked ? 'Blocked' : slot.vehicleId ? 'Occupied' : 'Empty'} />},
+            ]}/>
+          </details>
+        </Card>}
+      </div>
     </div>
+    {!!hubs.length && <Card title="Tỷ lệ chiếm dụng bãi đỗ theo Hub" extra={<span className="small muted">70% gần đầy · 90% quá tải</span>}>
+      <div className="triple">{hubs.map(hub => <CapacityMeter key={hub.id} label={hub.name} used={hub.stale ? null : hub.occupiedSlots} capacity={hub.totalSlots} />)}</div>
+    </Card>}
     {!hubs.length && !overview.pending && <Empty>Chưa có dữ liệu hub.</Empty>}
   </>;
 }
@@ -60,20 +72,37 @@ export function OperatorAlerts({ revision, refresh }: PageProps) {
   const alerts = useResource<Alert[]>('/operator/alerts',revision);
   const hubs = useResource<HubView[]>('/hubs',revision);
   const [filter, setFilter] = useState('Open');
+  const [selected, setSelected] = useState('');
   const action = useAction(refresh);
   const acknowledge = (alert: Alert) => action.run(() => mutate(`/operator/alerts/${alert.id}/acknowledge`, { expectedVersion:alert.version }), 'Đã tiếp nhận cảnh báo.');
+  const visible = (alerts.data ?? []).filter(item => !filter || item.status === filter);
+  const latest = (alerts.data ?? []).find(item => item.status === 'Open' && !item.acknowledgedAt);
+  const current = visible.find(item => item.id === selected);
+  const hub = hubs.data?.find(item => item.id === current?.hubId);
   return <>
     <ResourceStatus resources={[alerts,hubs]} />
     <Feedback feedback={action.feedback} />
-    <Card title="Cảnh báo tài nguyên" extra={<Field label="Lọc trạng thái"><select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="Open">Đang mở</option><option value="Resolved">Đã xử lý</option><option value="">Tất cả</option></select></Field>}>
-      <DataTable rows={(alerts.data ?? []).filter((item) => !filter || item.status===filter)} label="Danh sách cảnh báo" empty="Không có cảnh báo theo bộ lọc." columns={[
-        { label:'Hub', value:(item) => hubName(hubs.data ?? [],item.hubId) },
-        { label:'Loại', value:(item) => item.type === 'PARKING' ? 'Chiếm dụng bãi đỗ' : 'Hết cổng sạc khả dụng' },
+    {latest && <div className="alert-banner"><div><strong>{alertLabel(latest)} · {hubName(hubs.data ?? [],latest.hubId)}</strong>
+      <p className="small">Phát hiện <DateTime value={latest.openedAt} /></p></div>
+      <Button tone="primary" disabled={action.busy} onClick={() => { void acknowledge(latest); }}>Xác nhận đã nhận thông tin</Button>
+    </div>}
+    <div className="split-workspace alerts-layout">
+    <Card title="Cảnh báo tài nguyên">
+      <Field label="Lọc trạng thái"><select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="Open">Đang mở</option><option value="Resolved">Đã xử lý</option><option value="">Tất cả</option></select></Field>
+      <DataTable rows={visible} label="Danh sách cảnh báo" empty="Không có cảnh báo theo bộ lọc." columns={[
+        { label:'Hub', value:(item) => <button className="text-button" type="button" onClick={() => setSelected(item.id)}>{hubName(hubs.data ?? [],item.hubId)}</button> },
+        { label:'Loại', value:alertLabel },
         { label:'Mở lúc', value:(item) => <DateTime value={item.openedAt} /> },
         { label:'Trạng thái', value:(item) => <><Badge value={item.status} />{item.acknowledgedAt && <><div className="small muted">Tiếp nhận</div><DateTime value={item.acknowledgedAt} /></>}</> },
         { label:'Thao tác', value:(item) => item.status==='Open' && !item.acknowledgedAt ? <Button compact disabled={action.busy} onClick={() => { void acknowledge(item); }}>Tiếp nhận</Button> : '—' },
       ]} />
     </Card>
+    {current ? <Card title={hubName(hubs.data ?? [],current.hubId)} subtitle={alertLabel(current)} extra={<Badge value={current.status} />}>
+      <dl className="details"><dt>Phát hiện</dt><dd><DateTime value={current.openedAt} /></dd>
+        <dt>Tiếp nhận</dt><dd><DateTime value={current.acknowledgedAt} /></dd><dt>Xử lý</dt><dd><DateTime value={current.resolvedAt} /></dd></dl>
+      {hub && <CapacityMeter label="Chỗ đỗ hiện tại" used={hub.stale ? null : hub.occupiedSlots} capacity={hub.totalSlots} />}
+    </Card> : <Card className="empty-panel"><p>Chọn một cảnh báo để xem chi tiết</p></Card>}
+    </div>
   </>;
 }
 
@@ -114,9 +143,10 @@ export function OperatorIncidents({ revision, refresh }: PageProps) {
   return <>
     <ResourceStatus resources={[incidents,demo]} />
     <Feedback feedback={action.feedback} />
+    <div className="split-workspace incident-layout">
     <Card title="Ghi nhận sự cố">
       <form className="stack" onSubmit={(event) => submit(event, () => { void report(); })}>
-        <div className="row">
+        <div className="stack">
           <Field label="Loại tài nguyên"><select value={resourceType} onChange={(event) => { setResourceType(event.target.value as typeof resourceType); setResourceId(''); }}><option value="vehicle">Xe dùng chung</option><option value="point">Cổng sạc</option><option value="slot">Chỗ đỗ</option></select></Field>
           <Field label="Mã tài nguyên">{resources?.length ? <select required value={resourceId} onChange={(event) => setResourceId(event.target.value)}><option value="">Chọn tài nguyên</option>{resources.map((item) => <option value={item.id} key={item.id}>{item.id}</option>)}</select>
             : <input required value={resourceId} onChange={(event) => setResourceId(event.target.value)} />}</Field>
@@ -125,7 +155,8 @@ export function OperatorIncidents({ revision, refresh }: PageProps) {
         <div><Button type="submit" tone="primary" disabled={action.busy || !description.trim() || !resourceId}>Tạo báo cáo</Button></div>
       </form>
     </Card>
-    {incidents.data?.length ? <div className="triple">{[...incidents.data].reverse().map((item) => <IncidentCard key={item.id} incident={item} refresh={refresh} />)}</div> : <Empty>Chưa có báo cáo sự cố.</Empty>}
+    {incidents.data?.length ? <div className="stack">{[...incidents.data].reverse().map((item) => <IncidentCard key={item.id} incident={item} refresh={refresh} />)}</div> : <Card className="empty-panel"><p>Kết quả cô lập sẽ hiển thị ở đây</p></Card>}
+    </div>
   </>;
 }
 
@@ -164,19 +195,34 @@ export function OperatorRedistribution({ revision, refresh }: PageProps) {
   const [destination, setDestination] = useState('');
   const [quantity, setQuantity] = useState(1);
   const action = useAction(refresh);
+  const latest = orders.data?.at(-1);
+  const orderStep = !latest || ['Cancelled','Failed'].includes(latest.status) ? 0
+    : ['Completed','PartiallyCompleted'].includes(latest.status) ? 3 : ['InTransit','Arrived'].includes(latest.status) ? 2 : 1;
   return <>
     <ResourceStatus resources={[orders,hubs]}/>
     <Feedback feedback={action.feedback}/>
+    <p className="muted">Tạo và thực hiện lệnh điều chuyển phương tiện giữa các Hub.</p>
+    <ol className="stage-list" aria-label="Tiến độ điều phối">{['Chọn Hub và số xe','Xem phương án','Vận chuyển','Hoàn tất'].map((step,index) =>
+      <li key={step} aria-current={index === orderStep ? 'step' : undefined}>{index + 1}. {step}</li>)}</ol>
+    <Card title="Trạng thái các Hub">
+      <DataTable rows={hubs.data ?? []} label="Trạng thái các Hub" empty="Chưa có dữ liệu Hub." columns={[
+        {label:'Hub',value:hub => <strong>{hub.name}{source === hub.id && <span className="route-tag">Nguồn</span>}{destination === hub.id && <span className="route-tag">Đích</span>}</strong>},
+        {label:'Xe khả dụng',value:hub => hub.stale ? '—' : hub.availableVehicles},
+        {label:'Chỗ đỗ đang dùng',value:hub => hub.stale ? '—' : `${hub.occupiedSlots}/${hub.totalSlots}`},
+        {label:'Cổng sạc khả dụng',value:hub => hub.stale ? '—' : hub.availablePoints},
+        {label:'Trạng thái',value:hub => <HubStatus hub={hub} />},
+      ]} />
+    </Card>
     <Card title="Đề xuất lệnh điều phối" subtitle="Xe và chỗ đỗ đích sẽ được giữ khi xác nhận lệnh.">
       <form className="stack" onSubmit={(event) => submit(event, () => {
         void action.run(() => mutate('/operator/redistributions', { sourceHubId:source,destinationHubId:destination,quantity }), 'Đã tạo đề xuất điều phối.');
       })}>
-        <div className="row">
+        <div className="redistribution-fields">
           <HubField label="Hub nguồn" hubs={hubs.data ?? []} value={source} onChange={(value) => { setSource(value); if (value===destination) setDestination(''); }}/>
           <HubField label="Hub đích" hubs={hubs.data ?? []} exclude={source} value={destination} onChange={setDestination}/>
           <Field label="Số lượng xe"><input required type="number" min={1} value={quantity} onChange={(event) => setQuantity(event.target.valueAsNumber)}/></Field>
         </div>
-        <div><Button type="submit" tone="primary" disabled={action.busy || !source || !destination}>Tạo đề xuất</Button></div>
+        <div className="actions form-footer"><Button type="submit" tone="primary" disabled={action.busy || !source || !destination}>Tạo đề xuất</Button></div>
       </form>
     </Card>
     {orders.data?.length ? <div className="stack">{[...orders.data].reverse().map((order) => <OrderCard key={order.id} order={order} hubs={hubs.data ?? []} refresh={refresh}/>)}</div> : <Empty>Chưa có lệnh điều phối.</Empty>}
@@ -194,14 +240,23 @@ export function OperatorPlans({ revision, refresh }: PageProps) {
   return <>
     <ResourceStatus resources={[hubs,plans]}/>
     <Feedback feedback={action.feedback}/>
-    <Card title="Lập lịch sạc" subtitle="Tạo đề xuất, xem công suất và thứ tự ưu tiên trước khi áp dụng.">
+    <p className="muted">Lập lịch cho các phiên sạc đang chờ tại một Hub.</p>
+    <Card title="Chọn Hub để lập lịch">
       <form className="stack" onSubmit={(event) => submit(event, () => { void createPlan(); })}>
         <div className="row"><HubField hubs={hubs.data ?? []} value={hub} onChange={setHub}/>
           <Field label="Mã phiên cần ưu tiên, cách nhau bằng dấu phẩy (tùy chọn)"><input value={override} onChange={(event) => setOverride(event.target.value)} /></Field></div>
-        <div><Button type="submit" tone="primary" disabled={action.busy || !hub}>Xem kế hoạch đề xuất</Button></div>
+        <div className="actions form-footer"><Button type="submit" tone="primary" disabled={action.busy || !hub}>Xem kế hoạch đề xuất</Button></div>
       </form>
     </Card>
-    {plans.data?.length ? <div className="stack">{[...plans.data].reverse().map((plan) => <Card key={plan.id} title={`Kế hoạch · ${hubName(hubs.data ?? [],plan.hubId)}`} subtitle={plan.id} extra={<Badge value={plan.status} />}>
+    {plans.data?.length ? <div className="stack">{[...plans.data].reverse().map((plan) => {
+      const status = hubs.data?.find(item => item.id === plan.hubId);
+      return <Card key={plan.id} title={`Lịch sạc đề xuất · ${hubName(hubs.data ?? [],plan.hubId)}`} subtitle={plan.id} extra={<Badge value={plan.status} />}>
+      <div className="plan-formula"><strong>Điểm ưu tiên = (100 − mức pin) + 10 / số giờ còn lại</strong>
+        <p className="small muted">Phiên không có thời hạn được tính điểm theo mức pin.</p></div>
+      {status && <div className="grid-2">
+        <CapacityMeter label="Cổng sạc không khả dụng" used={status.stale ? null : (status.points?.length ?? 0) - status.availablePoints} capacity={status.points?.length ?? 0} />
+        <CapacityMeter label="Công suất đang dùng (kW)" used={status.stale ? null : status.powerInUseKW} capacity={status.powerLimitKW} />
+      </div>}
       <DataTable rows={plan.assignments.map((entry) => ({ ...entry, id:entry.sessionId }))} label="Lịch đề xuất" empty="Chưa có phiên đủ điều kiện xếp lịch." columns={[
         { label:'Phiên', value:(item) => item.sessionId },
         { label:'Cổng', value:(item) => item.pointId },
@@ -209,7 +264,7 @@ export function OperatorPlans({ revision, refresh }: PageProps) {
         { label:'Công suất', value:(item) => `${item.powerKW} kW` }, { label:'Điểm ưu tiên', value:(item) => item.priority.toFixed(2) },
       ]}/>
       {!!plan.excluded.length && <details><summary>Phiên chưa thể xếp lịch ({plan.excluded.length})</summary><ul>{plan.excluded.map((item) => <li key={item.sessionId}>{item.sessionId} · {item.reason}</li>)}</ul></details>}
-      {plan.status==='Proposed' && <div><Button tone="primary" disabled={action.busy || !plan.assignments.length} onClick={() => { void apply(plan); }}>Áp dụng lịch</Button></div>}
-    </Card>)}</div> : <Empty>Chưa có kế hoạch sạc.</Empty>}
+      {plan.status==='Proposed' && <div className="actions form-footer"><Button tone="primary" disabled={action.busy || !plan.assignments.length} onClick={() => { void apply(plan); }}>Áp dụng lịch</Button></div>}
+    </Card>})}</div> : <Empty>Chưa có kế hoạch sạc.</Empty>}
   </>;
 }
