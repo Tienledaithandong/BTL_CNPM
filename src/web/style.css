@@ -147,5 +147,9 @@ tr:last-child td{border-bottom:0}
 .hub-options{border:1px solid var(--line);padding:10px 12px;border-radius:8px;min-width:0}
 .hub-options legend{padding:0 6px;font-weight:600}
 .hub-options .row{gap:14px}
+.scenario-section{border-top:1px solid var(--line);padding-top:12px}
+.scenario-parking{display:flex;align-items:end;gap:8px}
+.scenario-parking>span{white-space:nowrap;padding-bottom:10px}
+.scenario-code{overflow-wrap:anywhere}
 .demo-choice[aria-pressed="true"]{border-color:var(--brand);background:var(--brand-soft)}
 .card ul{padding-inline-start:22px;margin:4px 0}

@@ -3,7 +3,7 @@ import { parseTimestamp } from '../api/time-format';
 import type { Hub, Reservation, Trip, Hold, Vehicle, Point } from '../api/types';
 
 export type Account = { id: string; role: 'STUDENT' | 'OPERATOR'; name?: string };
-export type HubView = Hub & { availableVehicles: number; availableSlots: number; availablePoints: number; points?: Array<Pick<Point, 'id'|'hubId'|'connectorType'|'ratedKW'|'blocked'>> };
+export type HubView = Hub & { availableVehicles: number; availableSlots: number; availablePoints: number; totalSlots: number; points?: Array<Pick<Point, 'id'|'hubId'|'connectorType'|'ratedKW'|'blocked'>> };
 export type VehicleView = Omit<Vehicle, 'allocationOwner'> & Pick<Partial<Vehicle>, 'allocationOwner'> & { eligible: boolean; reason?: string | null };
 export type ReservationView = Reservation & { hold: Hold | null; canPickup: boolean; pickupReason: string | null; needsReconciliation: boolean };
 export type TripView = Trip & { hold: Hold | null };

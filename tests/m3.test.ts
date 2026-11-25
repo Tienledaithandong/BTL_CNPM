@@ -145,6 +145,10 @@ test('UC16: deterministic 2/1 baseline versus 1/2 when one destination slot is b
   assert.deepEqual(network, before);
   const neutral = runWhatIf(network, { ...config, blockedSlots:0 }, '42', demand);
   assert.ok(Object.values(neutral.delta).every(value => value === 0 || value === null));
+  const blockedAtOrigin = runWhatIf(network, { ...config, blockedSlotsByHub:{ A:1, B:0 } }, '42', demand);
+  const blockedAtDestination = runWhatIf(network, { ...config, blockedSlotsByHub:{ A:0, B:1 } }, '42', demand);
+  assert.equal(blockedAtOrigin.scenario.metrics.servedTrips, 2);
+  assert.equal(blockedAtDestination.scenario.metrics.servedTrips, 1);
 });
 
 test('UC16: an alternative uses a compatible port and a slot for its full power window', () => {
@@ -282,6 +286,50 @@ test('A33: scenario PATCH updates configuration and bumps version', async t => {
   assert.equal(patched.config.tripDemandPct, 100);
   assert.equal(patched.config.chargingDemandPct, -20);
   assert.equal(patched.version, scenario.version + 1);
+});
+
+test('scenario codes increase on successful creates across concurrent writes and restart', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'mobility-scenario-codes-'));
+  let store = await Store.open(directory, () => now);
+  t.after(async () => { await store.close(); await rm(directory, { recursive:true, force:true }); });
+  const config = { hubIds:['H_METRO'], durationMinutes:60, tripDemandPct:0, chargingDemandPct:0,
+    blockedSlots:2, disabledPortsPct:0, concentrationPct:0, seed:45 };
+  const legacyId = 'SCENARIO-legacy';
+  await store.write(operator, tx => { tx.state.scenarios.push({id:legacyId,name:'Kịch bản cũ',config,version:1}); });
+  await assert.rejects(write(store, 'POST ' + scenarios, { name:'', config }), isCode('INVALID_INPUT'));
+  const created = await Promise.all(['Một', 'Hai'].map(name => write<Scenario>(store, 'POST ' + scenarios, { name, config })));
+  assert.deepEqual(created.map(scenario => scenario.id), ['SC-001', 'SC-002']);
+  const legacy = await write<Scenario>(store, 'PATCH ' + scenarios + '/:id', { id:legacyId, version:1, name:'Sửa kịch bản cũ' });
+  assert.equal(legacy.id, legacyId);
+  assert.deepEqual(legacy.config, config);
+  assert.deepEqual(legacy.legacyBlockedSlotsByHub, {H_METRO:2});
+  await store.close();
+  store = await Store.open(directory, () => now);
+  assert.equal((await write<Scenario>(store, 'POST ' + scenarios, { name:'Ba', config })).id, 'SC-003');
+});
+
+test('scenario windows use Vietnam time and capture per-Hub resource changes', async t => {
+  const store = await fixture(t);
+  const config = { hubIds:['H_METRO','H_KTX'], startTime:'19:30', endTime:'20:02',
+    tripDemandPct:200, disabledPortsPct:20, blockedSlotsByHub:{ H_METRO:2, H_KTX:1 } };
+  const create = (changes: Record<string, unknown>) => write<Scenario>(store, 'POST ' + scenarios, { name:'Giờ cao điểm', config:{...config,...changes} });
+  await assert.rejects(create({ startTime:'18:59' }), isCode('INVALID_TIME'));
+  await assert.rejects(create({ endTime:'19:30' }), isCode('INVALID_TIME'));
+  await assert.rejects(create({ blockedSlotsByHub:{ H_METRO:16 } }), isCode('INVALID_INPUT'));
+  const scenario = await create({});
+  assert.equal(scenario.config.durationMinutes, 32);
+  assert.equal(scenario.config.seed, 42);
+  const view = await write<Run>(store, 'POST ' + scenarios + '/:id/runs', { id:scenario.id, version:scenario.version });
+  const run = store.snapshot().runs.find(item => item.id === view.id)!;
+  const captured = run.input as { network: SimulationNetwork; config: SimulationConfig };
+  assert.equal(captured.network.capturedAt, now);
+  assert.equal(captured.config.startAt, now + 30 * 60_000);
+  assert.equal(captured.config.hours, 32 / 60);
+  assert.deepEqual(captured.config.blockedSlotsByHub, config.blockedSlotsByHub);
+  assert.equal(captured.config.unavailablePortPct, 20);
+
+  const defaultWindow = await create({startTime:null,endTime:null});
+  assert.equal(defaultWindow.config.durationMinutes, 300);
 });
 
 test('A35: charging plan energy follows the session estimate when telemetry lags', async t => {

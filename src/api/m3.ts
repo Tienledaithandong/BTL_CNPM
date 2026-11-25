@@ -5,12 +5,14 @@ import { allocateVehicle, confirmVehicleArrival, markVehicleInTransit, releaseVe
 import { applyChargingAssignments, arriveDestination, canScheduleCharge, fitsPowerWindow, releaseDestination, reserveDestination } from './m2.js';
 import {
   checkVersion, entity, fail, fresh, number, requiredString,
-  type AddRoute, type ChargingPlan, type Input, type Item, type Order, type PlanAssignment, type Run, type ScenarioConfig,
+  type AddRoute, type ChargingPlan, type Input, type Item, type Order, type PlanAssignment, type Run, type Scenario, type ScenarioConfig,
   type Session, type State, type Tx,
 } from './types.js';
 
 const MINUTE = 60_000;
 const TICK = 5 * MINUTE;
+const DAY = 24 * 60 * MINUTE;
+const VIETNAM_OFFSET = 7 * 60 * MINUTE;
 const ENGINE_VERSION = '2';
 
 export function chargingPriority(battery: number, neededAt: number | null, now: number) {
@@ -43,6 +45,8 @@ export interface SimulationConfig {
   chargingChangePct: number;
   unavailablePortPct: number;
   blockedSlots: number;
+  startAt?: number;
+  blockedSlotsByHub?: Record<string, number>;
   concentrationPct?: number;
 }
 
@@ -88,12 +92,11 @@ function seeded(seed: string, id: string) {
   return createHash('sha256').update(JSON.stringify([seed, id])).digest().readUInt32BE() / 2 ** 32;
 }
 
-function makeDemands(network: SimulationNetwork, hours: number, seed: string): Demands {
+function makeDemands(network: SimulationNetwork, startAt: number, endAt: number, seed: string): Demands {
   const hubs = [...network.hubs].sort(lexical);
   const trips: TripDemand[] = [];
   const charges: ChargeDemand[] = [];
-  for (let tick = 0; tick < hours * 12; tick++) {
-    const at = network.capturedAt + tick * TICK;
+  for (let tick = 0, at = startAt; at < endAt; tick++, at += TICK) {
     for (const [index, hub] of hubs.entries()) {
       const id = hub.id + ':' + tick;
       if (seeded(seed, id + ':trip') < 0.34) {
@@ -141,19 +144,24 @@ function findChargeWindow(hub: SimHub, req: ChargeDemand, ports: SimPort[], slot
   }
 }
 
-function* simulate(source: SimulationNetwork, hours: number, demands: Demands, config: SimulationConfig | null): Generator<void,SimResult> {
+function blockCandidates<T extends Pick<SimSlot, 'id' | 'occupiedBy' | 'blocked'>>(slots: T[]): T[] {
+  return slots.filter(slot => !slot.blocked).sort((a, b) =>
+    Number(a.occupiedBy !== null) - Number(b.occupiedBy !== null) || lexical(a, b));
+}
+
+function* simulate(source: SimulationNetwork, startAt: number, horizon: number, demands: Demands, config: SimulationConfig | null): Generator<void,SimResult> {
   const network = structuredClone(source);
-  const horizon = network.capturedAt + hours * 60 * MINUTE;
   const hubs = [...network.hubs].sort(lexical);
   const vehicles = [...network.vehicles].sort(lexical);
   const slots = [...network.slots].sort(lexical);
   const ports = [...network.ports].sort(lexical);
   const affectedIds = new Set<string>();
   if (config) {
-    // A scenario disables a total number of slots, distributed by stable slot ID.
-    const blockCandidates = slots.filter(slot => !slot.blocked).sort((a, b) =>
-      Number(a.occupiedBy !== null) - Number(b.occupiedBy !== null) || lexical(a, b));
-    for (const slot of blockCandidates.slice(0, config.blockedSlots)) slot.blocked = true;
+    const candidates = blockCandidates(slots);
+    const blocked = config.blockedSlotsByHub
+      ? Object.entries(config.blockedSlotsByHub).flatMap(([hubId, count]) => candidates.filter(slot => slot.hubId === hubId).slice(0, count))
+      : candidates.slice(0, config.blockedSlots);
+    for (const slot of blocked) slot.blocked = true;
     for (const hub of hubs) {
       const healthy = ports.filter(port => port.hubId === hub.id && !port.blocked);
       for (const port of healthy.slice(0, Math.round(healthy.length * config.unavailablePortPct / 100))) port.blocked = true;
@@ -163,7 +171,7 @@ function* simulate(source: SimulationNetwork, hours: number, demands: Demands, c
         && !source.slots.some(slot => slot.id === item.slotId && slot.blocked);
       const disabledPort = item.portId && ports.some(port => port.id === item.portId && port.blocked)
         && !source.ports.some(port => port.id === item.portId && port.blocked);
-      if (overlaps(network.capturedAt, horizon, item.start, item.end) && (disabledSlot || disabledPort)) affectedIds.add(item.id);
+      if (overlaps(startAt, horizon, item.start, item.end) && (disabledSlot || disabledPort)) affectedIds.add(item.id);
     }
   }
   const initialSlots = slots.map(slot => ({ ...slot }));
@@ -184,7 +192,7 @@ function* simulate(source: SimulationNetwork, hours: number, demands: Demands, c
   const canUseSlot = (slot: SimSlot, start: number, end: number) =>
     !slot.blocked && slot.occupiedBy === null && !allocated.has(slot.id) &&
     !network.commitments.some(item => item.slotId === slot.id && overlaps(start, end, item.start, item.end));
-  for (let now = network.capturedAt; now < horizon; now += TICK) {
+  for (let now = startAt; now < horizon; now += TICK) {
     yield;
     for (let index = inbound.length - 1; index >= 0; index--) {
       const arrival = inbound[index];
@@ -309,9 +317,11 @@ function concentrateTrips(trips: TripDemand[], config: SimulationConfig, seed: s
 }
 
 function* whatIf(network: SimulationNetwork, config: SimulationConfig, seed: string, fixture?: Demands) {
-  const demand = fixture ?? makeDemands(network, config.hours, seed);
-  const {outcome:baseline} = yield* simulate(network, config.hours, demand, null);
-  const {outcome:scenario,initialSlots,alternatives} = yield* simulate(network, config.hours, { trips: concentrateTrips(scaleDemand(demand.trips, config.tripChangePct, seed), config, seed),
+  const startAt = config.startAt ?? network.capturedAt;
+  const through = startAt + Math.round(config.hours * 60 * MINUTE);
+  const demand = fixture ?? makeDemands(network, startAt, through, seed);
+  const {outcome:baseline} = yield* simulate(network, startAt, through, demand, null);
+  const {outcome:scenario,initialSlots,alternatives} = yield* simulate(network, startAt, through, { trips: concentrateTrips(scaleDemand(demand.trips, config.tripChangePct, seed), config, seed),
     charges: scaleDemand(demand.charges, config.chargingChangePct, seed) }, config);
   const delta: Record<keyof SimMetrics, number | null> = { ...baseline.metrics };
   for (const metric of Object.keys(delta) as (keyof SimMetrics)[]) {
@@ -320,10 +330,9 @@ function* whatIf(network: SimulationNetwork, config: SimulationConfig, seed: str
     delta[metric] = left === null || right === null ? null : rounded(right - left);
   }
   const recommendations: { hubId: string; operation: string; detail: string; window?: ChargeAlternative }[] = [];
-  const through = network.capturedAt + config.hours * 60 * MINUTE;
   const room = (hubId: string) => initialSlots.filter(slot => slot.hubId === hubId && slot.kind === 'SHARED' &&
     !slot.blocked && slot.occupiedBy === null && !network.commitments.some(c => c.slotId === slot.id &&
-      overlaps(network.capturedAt, through, c.start, c.end))).length;
+      overlaps(startAt, through, c.start, c.end))).length;
   for (const [hubId, short] of Object.entries(scenario.shortages)) {
     if (short.vehicles > 0) {
       const source = [...network.hubs].sort(lexical).map(hub => ({
@@ -643,22 +652,73 @@ function bounded(input: Input, key: string, fallback: number, min: number, max: 
   return value;
 }
 
-function configured(state: State, input: Input): ScenarioConfig {
-  const raw = input.config && typeof input.config === 'object' && !Array.isArray(input.config) ? input.config as Input : input;
+function scenarioTime(input: Input, key: 'startTime' | 'endTime', label: string): string | null | undefined {
+  const value = input[key];
+  if (value === undefined || value === null) return value;
+  if (typeof value !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value))
+    fail(400, 'INVALID_TIME', label + ' phải có định dạng giờ:phút.');
+  return value;
+}
+
+function dailyScenarioWindow(now: number, startTime: string | null | undefined, endTime: string | null | undefined, allowNextDay: boolean) {
+  const offset = (time: string) => (Number(time.slice(0, 2)) * 60 + Number(time.slice(3))) * MINUTE;
+  const start = startTime ? offset(startTime) : 0;
+  const end = endTime ? offset(endTime) : DAY;
+  if (start >= end) fail(400, 'INVALID_TIME', 'Giờ kết thúc phải sau giờ bắt đầu.');
+  const midnight = Math.floor((now + VIETNAM_OFFSET) / DAY) * DAY - VIETNAM_OFFSET;
+  const currentMinute = Math.floor(now / MINUTE) * MINUTE;
+  const passed = startTime ? midnight + start < currentMinute : midnight + end <= now;
+  if (passed && !allowNextDay)
+    fail(400, 'INVALID_TIME', startTime ? 'Giờ bắt đầu phải từ thời điểm hiện tại trở đi.' : 'Giờ kết thúc phải sau thời điểm hiện tại.');
+  const day = passed ? midnight + DAY : midnight;
+  return { startAt: Math.max(now, day + start), endAt: day + end };
+}
+
+function configured(tx: Tx, raw: Input, previous?: ScenarioConfig): ScenarioConfig {
+  const { state, now } = tx;
   const ids = raw.hubIds;
   if (!Array.isArray(ids) || ids.length < 1 || ids.length > 3 || new Set(ids).size !== ids.length ||
       !ids.every(id => typeof id === 'string' && state.hubs.some(hub => hub.id === id)))
     fail(400, 'INVALID_HUBS', 'Chọn 1 đến 3 Hub đang tồn tại.');
-  const durationMinutes = bounded(raw, 'durationMinutes', 120, 5, 360, true);
-  if (durationMinutes % 5 !== 0) fail(400, 'INVALID_DURATION', 'Thời lượng phải chia hết cho 5 phút.');
-  return { hubIds: ids as string[], durationMinutes,
+  const startTime = scenarioTime(raw, 'startTime', 'Giờ bắt đầu');
+  const endTime = scenarioTime(raw, 'endTime', 'Giờ kết thúc');
+  let durationMinutes: number;
+  if (startTime !== undefined || endTime !== undefined) {
+    const unchanged = previous !== undefined && previous.startTime === startTime && previous.endTime === endTime;
+    const window = dailyScenarioWindow(now, startTime, endTime, unchanged);
+    durationMinutes = Math.ceil((window.endAt - window.startAt) / MINUTE);
+  } else {
+    durationMinutes = bounded(raw, 'durationMinutes', 120, 5, 360, true);
+    if (durationMinutes % 5 !== 0) fail(400, 'INVALID_DURATION', 'Thời lượng phải chia hết cho 5 phút.');
+  }
+  const slots = state.slots.filter(slot => ids.includes(slot.hubId));
+  const config: ScenarioConfig = { hubIds: ids as string[], durationMinutes,
     tripDemandPct: bounded(raw, 'tripDemandPct', 0, -100, 200),
     chargingDemandPct: bounded(raw, 'chargingDemandPct', 0, -100, 200),
-    blockedSlots: bounded(raw, 'blockedSlots', 0, 0, state.slots.filter(slot => ids.includes(slot.hubId)).length, true),
+    blockedSlots: raw.blockedSlotsByHub === undefined ? bounded(raw, 'blockedSlots', 0, 0, slots.length, true) : 0,
     disabledPortsPct: bounded(raw, 'disabledPortsPct', 0, 0, 100),
     concentrationPct: bounded(raw, 'concentrationPct', 0, -100, 100),
     seed: bounded(raw, 'seed', 42, 0, 2 ** 31 - 1, true),
   };
+  if (startTime !== undefined) config.startTime = startTime;
+  if (endTime !== undefined) config.endTime = endTime;
+  const byHub = raw.blockedSlotsByHub;
+  if (byHub !== undefined) {
+    if (!byHub || typeof byHub !== 'object' || Array.isArray(byHub))
+      fail(400, 'INVALID_INPUT', 'Nhập số chỗ đỗ không khả dụng theo từng Hub.');
+    const entries = Object.entries(byHub);
+    for (const [id, count] of entries) {
+      if (!ids.includes(id)) fail(400, 'INVALID_HUBS', 'Chỉ nhập số chỗ đỗ cho các Hub trong phạm vi.');
+      const limit = slots.filter(slot => slot.hubId === id).length;
+      if (typeof count !== 'number' || !Number.isInteger(count) || count < 0 || count > limit) {
+        const hub = entity(state.hubs, id, 'Hub');
+        fail(400, 'INVALID_INPUT', `Số chỗ đỗ không khả dụng tại ${hub.name} phải là số nguyên từ 0 đến ${limit}.`);
+      }
+    }
+    config.blockedSlotsByHub = Object.fromEntries(entries);
+    config.blockedSlots = entries.reduce((sum, [, count]) => sum + count, 0);
+  }
+  return config;
 }
 
 function captureNetwork(state: State, config: ScenarioConfig, now: number): SimulationNetwork {
@@ -713,28 +773,53 @@ function publicRun(run: Run) {
   return result;
 }
 
+function publicScenario(state: State, scenario: Scenario): Scenario {
+  const { config } = scenario;
+  if (config.blockedSlotsByHub || !config.blockedSlots) return scenario;
+  const slots = state.slots.filter(slot => config.hubIds.includes(slot.hubId)).map(slot => ({ ...slot, occupiedBy: slot.vehicleId }));
+  const counts: Record<string, number> = {};
+  for (const { hubId } of blockCandidates(slots).slice(0, config.blockedSlots)) counts[hubId] = (counts[hubId] ?? 0) + 1;
+  return { ...scenario, legacyBlockedSlotsByHub: counts };
+}
+
 function registerSimulations(add: AddRoute): void {
   const base = '/operator/scenarios';
-  add('GET', base, 'OPERATOR', tx => [...tx.state.scenarios].reverse());
+  const configInput = (input: Input): Input => input.config && typeof input.config === 'object' && !Array.isArray(input.config) ? input.config as Input : input;
+  add('GET', base, 'OPERATOR', tx => [...tx.state.scenarios].reverse().map(scenario => publicScenario(tx.state, scenario)));
   add('POST', base, 'OPERATOR', (tx, input) => {
     const name = requiredString(input, 'name');
     if (name.length > 80) fail(400, 'INVALID_INPUT', 'Tên kịch bản tối đa 80 ký tự.');
-    const config = configured(tx.state, input);
-    const scenario = { id: tx.id('SCENARIO'), name, config, version: 1 };
+    const config = configured(tx, configInput(input));
+    const latest = tx.state.scenarios.reduce((max, scenario) => {
+      const match = /^SC-(\d+)$/.exec(scenario.id);
+      return match ? Math.max(max, Number(match[1])) : max;
+    }, 0);
+    const scenario = { id: 'SC-' + String(latest + 1).padStart(3, '0'), name, config, version: 1 };
     tx.state.scenarios.push(scenario);
     tx.log('SIMULATION_SCENARIO_CREATED', scenario.id, 'Đã lưu kịch bản.');
-    return scenario;
+    return publicScenario(tx.state, scenario);
   });
   add('PATCH', base + '/:id', 'OPERATOR', (tx, input) => {
     const scenario = entity(tx.state.scenarios, requiredString(input, 'id'), 'kịch bản');
     checkVersion(input, scenario);
     const name = input.name === undefined ? scenario.name : requiredString(input, 'name');
     if (name.length > 80) fail(400, 'INVALID_INPUT', 'Tên kịch bản tối đa 80 ký tự.');
-    const incoming = input.config && typeof input.config === 'object' && !Array.isArray(input.config) ? input.config as Input : input;
-    const config = configured(tx.state, { ...scenario.config, ...incoming });
+    const incoming = configInput(input);
+    const raw: Input = { ...scenario.config, ...incoming };
+    if (incoming.durationMinutes !== undefined && incoming.startTime === undefined && incoming.endTime === undefined) {
+      delete raw.startTime;
+      delete raw.endTime;
+    }
+    if (incoming.blockedSlotsByHub === undefined && scenario.config.blockedSlotsByHub) {
+      const hubIds = incoming.hubIds;
+      if (incoming.blockedSlots !== undefined) delete raw.blockedSlotsByHub;
+      else if (Array.isArray(hubIds))
+        raw.blockedSlotsByHub = Object.fromEntries(Object.entries(scenario.config.blockedSlotsByHub).filter(([id]) => hubIds.includes(id)));
+    }
+    const config = configured(tx, raw, scenario.config);
     Object.assign(scenario, { name, config, version: scenario.version + 1 });
     tx.log('SIMULATION_SCENARIO_UPDATED', scenario.id, 'Đã cập nhật kịch bản.');
-    return scenario;
+    return publicScenario(tx.state, scenario);
   });
   add('POST', base + '/:id/runs', 'OPERATOR', (tx, input) => {
     const scenario = entity(tx.state.scenarios, requiredString(input, 'id'), 'kịch bản');
@@ -745,6 +830,13 @@ function registerSimulations(add: AddRoute): void {
       tripChangePct: scenario.config.tripDemandPct, chargingChangePct: scenario.config.chargingDemandPct,
       unavailablePortPct: scenario.config.disabledPortsPct, blockedSlots: scenario.config.blockedSlots,
       concentrationPct: scenario.config.concentrationPct };
+    const { startTime, endTime, blockedSlotsByHub } = scenario.config;
+    if (startTime !== undefined || endTime !== undefined) {
+      const { startAt, endAt } = dailyScenarioWindow(tx.now, startTime, endTime, true);
+      config.startAt = startAt;
+      config.hours = (endAt - startAt) / (60 * MINUTE);
+    }
+    if (blockedSlotsByHub) config.blockedSlotsByHub = blockedSlotsByHub;
     const network = captureNetwork(tx.state, scenario.config, tx.now);
     const run: Run = { id: tx.id('RUN'), scenarioId: scenario.id, status: 'Running', createdAt: tx.now,
       finishedAt: null, error: null, result: null, snapshotVersion: tx.state.version,
