@@ -6,7 +6,15 @@ import { mutate, useAction, useResource } from './client';
 import { Badge, Card, DateTime, Empty, Field } from './ui';
 import { Button, DataTable, Feedback, ResourceStatus, hubName } from './components';
 
-const newConfig = (): ScenarioConfig => ({ hubIds:[], durationMinutes:60, tripDemandPct:0, chargingDemandPct:0, blockedSlots:0, disabledPortsPct:0, concentrationPct:0, seed:42 });
+const newConfig = (): ScenarioConfig => ({
+  hubIds:[], startTime:null, endTime:null, durationMinutes:60, tripDemandPct:0, chargingDemandPct:0,
+  blockedSlots:0, blockedSlotsByHub:{}, disabledPortsPct:0, concentrationPct:0, seed:42,
+});
+
+function displayWindow(config: ScenarioConfig) {
+  if (config.startTime === undefined && config.endTime === undefined) return `${config.durationMinutes} phút`;
+  return `${config.startTime ?? 'Khi chạy'} – ${config.endTime ?? 'cuối ngày'}`;
+}
 const labels: Record<string,string> = {
   servedTrips:'Lượt thuê đáp ứng', rejectedTrips:'Lượt thuê từ chối', peakParkingOccupancy:'Chiếm dụng đỗ cao nhất',
   waitingChargingMinutes:'Tổng phút đợi sạc', meanChargingWait:'Thời gian đợi sạc trung bình',
@@ -48,52 +56,87 @@ export function OperatorScenarios({ revision, refresh }: { revision: number; ref
   const hubs = useResource<HubView[]>('/hubs',revision);
   const scenarios = useResource<Scenario[]>('/operator/scenarios',revision);
   const runs = useResource<Run[]>('/operator/runs',revision);
-  const [selected, setSelected] = useState('');
+  const [selected, setSelected] = useState<Scenario>();
   const [name, setName] = useState('');
   const [config, setConfig] = useState(newConfig);
   const action = useAction(refresh);
   const edit = (scenario?: Scenario) => {
-    setSelected(scenario?.id ?? '');
+    setSelected(scenario);
     setName(scenario?.name ?? '');
     setConfig(scenario ? structuredClone(scenario.config) : newConfig());
   };
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const current = scenarios.data?.find((scenario) => scenario.id===selected);
     const result = await action.run(
-      () => current ? mutate<Scenario>(`/operator/scenarios/${current.id}`,{name,config,expectedVersion:current.version},'PATCH') : mutate<Scenario>('/operator/scenarios',{name,config}),
+      () => selected ? mutate<Scenario>(`/operator/scenarios/${selected.id}`,{name,config,expectedVersion:selected.version},'PATCH') : mutate<Scenario>('/operator/scenarios',{name,config}),
       'Đã lưu cấu hình kịch bản.',
     );
     if (result) edit(result);
   }
   const run = (scenario: Scenario) => action.run(() => mutate<Run>(`/operator/scenarios/${scenario.id}/runs`,{expectedVersion:scenario.version}), 'Đã gửi kịch bản để chạy trên bản chụp.');
-  const setNumber = (key: Exclude<keyof ScenarioConfig,'hubIds'>) => (value: number) => setConfig((prev) => ({ ...prev,[key]:value }));
-  const inputs: Array<{ key: Exclude<keyof ScenarioConfig,'hubIds'>; label:string; min:number; max?:number; step?:number }> = [
-    {key:'durationMinutes', label:'Thời lượng (phút)',min:5,max:360,step:5},
-    {key:'tripDemandPct',label:'Thay đổi nhu cầu thuê (%)',min:-100,max:100},
-    {key:'chargingDemandPct',label:'Thay đổi nhu cầu sạc (%)',min:-100,max:100},
-    {key:'blockedSlots',label:'Số chỗ đỗ bị chặn',min:0},
-    {key:'disabledPortsPct',label:'Tỷ lệ cổng sạc bị tắt (%)',min:0,max:100},
-    {key:'concentrationPct',label:'Tập trung chuyến về hub đầu tiên (%)',min:-100,max:100},
-    {key:'seed',label:'Seed mô phỏng',min:1},
-  ];
+  const selectedHubs = config.hubIds.map(id => hubs.data?.find(hub => hub.id === id)).filter(hub => hub !== undefined);
+  const legacyBlockedSlots = selected?.legacyBlockedSlotsByHub;
+  const setTime = (key: 'startTime' | 'endTime', value: string) => setConfig(prev => ({ ...prev, [key]: value || null }));
+  const setNumber = (key: 'tripDemandPct' | 'chargingDemandPct' | 'disabledPortsPct' | 'concentrationPct', value: number) =>
+    setConfig(prev => ({ ...prev, [key]: value }));
+  const toggleHub = (hubId: string, checked: boolean) => setConfig(prev => {
+    const hubIds = checked ? [...prev.hubIds, hubId] : prev.hubIds.filter(id => id !== hubId);
+    const counts = prev.blockedSlotsByHub ?? legacyBlockedSlots;
+    const blockedSlotsByHub = Object.fromEntries(hubIds.map(id => [id, counts?.[id] ?? 0]));
+    return { ...prev, hubIds, blockedSlots: 0, blockedSlotsByHub };
+  });
+  const setBlockedSlots = (hubId: string, value: number) => setConfig(prev => ({
+    ...prev, blockedSlots: 0, blockedSlotsByHub: { ...(prev.blockedSlotsByHub ?? legacyBlockedSlots), [hubId]: value },
+  }));
+  const numberValue = (value: number) => Number.isFinite(value) ? value : '';
   return <>
     <ResourceStatus resources={[hubs,scenarios,runs]} />
     <Feedback feedback={action.feedback} />
-    <Card title={selected ? 'Sửa kịch bản' : 'Kịch bản mới'} subtitle="Mô phỏng trên bản chụp mạng lưới để so sánh trước khi điều phối.">
+    <Card title={selected ? 'Sửa kịch bản' : 'Kịch bản mới'}
+      extra={selected && <span className="small muted scenario-code">{selected.id}</span>}
+      subtitle={selected ? 'Mô phỏng trên bản chụp mạng lưới để so sánh trước khi điều phối.' : 'Mã kịch bản được tạo khi bạn lưu.'}>
       <form onSubmit={(event) => { void save(event); }} className="stack">
-        <Field label="Tên kịch bản"><input required maxLength={100} value={name} onChange={(event) => setName(event.target.value)} /></Field>
-        <fieldset className="hub-options"><legend>Phạm vi hub</legend><div className="row">{(hubs.data ?? []).map((hub) => <label className="checkbox" key={hub.id}><input type="checkbox" checked={config.hubIds.includes(hub.id)} onChange={(event) => {
-          const checked = event.target.checked;
-          setConfig((prev) => ({...prev,hubIds:checked ? [...prev.hubIds,hub.id] : prev.hubIds.filter((id) => id!==hub.id)}));
-        }}/>{hub.name}</label>)}</div></fieldset>
-        <div className="triple">{inputs.map(({key,label,min,max,step}) => <Field key={key} label={label}><input required type="number" min={min} max={max} step={step ?? 1} value={Number.isFinite(config[key]) ? config[key] : ''} onChange={(event) => setNumber(key)(event.target.valueAsNumber)} /></Field>)}</div>
-        <div className="actions"><Button tone="primary" type="submit" disabled={action.busy || !name.trim() || !config.hubIds.length}>Lưu kịch bản</Button>{selected && <Button onClick={() => edit()}>Tạo kịch bản khác</Button>}</div>
+        <Field label="Tên kịch bản"><input required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} /></Field>
+        <fieldset className="hub-options"><legend>Phạm vi áp dụng</legend><div className="row">{(hubs.data ?? []).map(hub => <label className="checkbox" key={hub.id}>
+          <input type="checkbox" checked={config.hubIds.includes(hub.id)} onChange={event => toggleHub(hub.id, event.target.checked)} />{hub.name}
+        </label>)}</div></fieldset>
+        <div className="grid-2">
+          <Field label="Giờ bắt đầu"><input type="time" value={config.startTime ?? ''} onChange={event => setTime('startTime', event.target.value)} /></Field>
+          <Field label="Giờ kết thúc"><input type="time" value={config.endTime ?? ''} onChange={event => setTime('endTime', event.target.value)} /></Field>
+        </div>
+        <p className="small muted">Giờ Việt Nam. {config.startTime === undefined && config.endTime === undefined
+          ? `Kịch bản này đang dùng thời lượng ${config.durationMinutes} phút. Nhập giờ để chuyển sang khung giờ.`
+          : 'Bỏ trống giờ bắt đầu để tính từ lúc chạy, hoặc giờ kết thúc để tính đến hết ngày.'}</p>
+        <section className="stack scenario-section">
+          <h3>Nhu cầu</h3>
+          <div className="grid-2">
+            <Field label="Thay đổi nhu cầu sử dụng (%)"><input required type="number" min={-100} max={200} step="any" value={numberValue(config.tripDemandPct)} onChange={event => setNumber('tripDemandPct', event.target.valueAsNumber)} /></Field>
+            <Field label="Thay đổi nhu cầu sạc (%)"><input required type="number" min={-100} max={200} step="any" value={numberValue(config.chargingDemandPct)} onChange={event => setNumber('chargingDemandPct', event.target.valueAsNumber)} /></Field>
+          </div>
+        </section>
+        <section className="stack scenario-section">
+          <h3>Tài nguyên Hub</h3>
+          <div className="grid-2">
+            <Field label="Mức tập trung phương tiện (%)"><input required type="number" min={-100} max={100} step="any" value={numberValue(config.concentrationPct)} onChange={event => setNumber('concentrationPct', event.target.valueAsNumber)} /></Field>
+            <Field label="Tỷ lệ cổng sạc khả dụng (%)"><input required type="number" min={0} max={100} step="any" value={numberValue(Number((100 - config.disabledPortsPct).toFixed(10)))} onChange={event => setNumber('disabledPortsPct', 100 - event.target.valueAsNumber)} /></Field>
+          </div>
+          <p className="small muted">Mức tập trung điều chỉnh lượt xe về Hub được chọn đầu tiên{selectedHubs[0] ? ` (${selectedHubs[0].name})` : ''}.</p>
+          {selectedHubs.length > 0 && <fieldset className="hub-options">
+            <legend>Chỗ đỗ không khả dụng</legend>
+            <div className="grid-2">{selectedHubs.map(hub => <div className="scenario-parking" key={hub.id}>
+              <Field label={`Số chỗ đỗ không khả dụng tại ${hub.name}`}><input required type="number" min={0} max={hub.totalSlots} step={1}
+                value={numberValue((config.blockedSlotsByHub ?? legacyBlockedSlots)?.[hub.id] ?? 0)} onChange={event => setBlockedSlots(hub.id, event.target.valueAsNumber)} /></Field>
+              <span className="small muted">/ {hub.totalSlots} chỗ</span>
+            </div>)}</div>
+          </fieldset>}
+        </section>
+        <div className="actions"><Button tone="primary" type="submit" disabled={action.busy || !name.trim() || !config.hubIds.length}>Lưu kịch bản</Button>{selected && <Button disabled={action.busy} onClick={() => edit()}>Tạo kịch bản khác</Button>}</div>
       </form>
     </Card>
     <Card title="Kịch bản đã lưu"><DataTable rows={scenarios.data ?? []} label="Kịch bản mô phỏng" empty="Chưa có kịch bản." columns={[
+      { label:'Mã kịch bản', value:(item) => <span className="scenario-code">{item.id}</span> },
       { label:'Kịch bản', value:(item) => item.name },
-      { label:'Thời lượng', value:(item) => `${item.config.durationMinutes} phút` },
+      { label:'Thời gian', value:(item) => displayWindow(item.config) },
       { label:'Phạm vi', value:(item) => item.config.hubIds.map((id) => hubName(hubs.data ?? [],id)).join(', ') },
       { label:'Thao tác', value:(item) => <div className="actions"><Button compact disabled={action.busy} onClick={() => edit(item)}>Chỉnh sửa</Button>
         <Button compact tone="primary" disabled={action.busy} onClick={() => { void run(item); }}>Chạy mô phỏng</Button></div> },

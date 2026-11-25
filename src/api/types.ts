@@ -47,8 +47,12 @@ export interface Order {
 }
 export interface PlanAssignment { sessionId: string; pointId: string; startAt: number; endAt: number; powerKW: number; priority: number }
 export interface ChargingPlan { id: string; hubId: string; version: number; baseVersion: number; status: 'Proposed'|'Applied'; assignments: PlanAssignment[]; excluded: {sessionId:string;reason:string}[] }
-export interface ScenarioConfig { hubIds:string[]; durationMinutes:number; tripDemandPct:number; chargingDemandPct:number; blockedSlots:number; disabledPortsPct:number; concentrationPct:number; seed:number }
-export interface Scenario { id:string; name:string; config:ScenarioConfig; version:number }
+export interface ScenarioConfig {
+  hubIds:string[]; durationMinutes:number; tripDemandPct:number; chargingDemandPct:number;
+  blockedSlots:number; disabledPortsPct:number; concentrationPct:number; seed:number;
+  startTime?:string|null; endTime?:string|null; blockedSlotsByHub?:Record<string,number>;
+}
+export interface Scenario { id:string; name:string; config:ScenarioConfig; version:number; legacyBlockedSlotsByHub?:Record<string,number> }
 export interface Run { id:string; scenarioId:string; status:'Running'|'Completed'|'Failed'; createdAt:number; finishedAt:number|null; result:unknown; error:string|null; snapshotVersion:number; input?: unknown }
 export interface Command {
   id: string; type: 'UNLOCK'|'CHARGE_START'|'CHARGE_STOP'; resourceId: string; subjectId: string;
