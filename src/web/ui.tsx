@@ -26,40 +26,31 @@ export function Icon({ name, size = 19 }: { name: IconName; size?: number }) {
   return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round"><path d={drawing[name]} /></svg>;
 }
 
-export function Brand() {
-  return <div className="brand"><span className="logo"><Icon name="bolt" size={21} /></span><span>Smart E-Mobility Hub</span></div>;
+export function Brand({ operator = false }: { operator?: boolean }) {
+  return <div className="brand"><span className="logo" aria-hidden="true">E</span><span>{operator ? 'E-Mobility Hub' : 'Smart E-Mobility Hub'}</span></div>;
 }
 
-export function Circuit() {
-  return <svg aria-hidden="true" className="circuit" viewBox="0 0 500 230" fill="none" preserveAspectRatio="xMidYMid slice">
-    <g stroke="#97bcff" strokeWidth="1.5">
-      <path d="m32 186 114-65 104 57 120-66 108 53M32 186l120 31 88-22m10-17 8-126 112 60 53-78m-277 87-9-73 121 4m-8 126 8 35m112-101 2 105" />
-      <path opacity=".55" d="M3 125 137 48 75 12m350 21 71 12m-126 67 95-28" />
-    </g>
-    <g fill="#2458bc" stroke="#b2ccff" strokeWidth="3">
-      <circle cx="32" cy="186" r="7"/><circle cx="146" cy="121" r="11"/><circle cx="250" cy="178" r="12"/>
-      <circle cx="258" cy="52" r="12"/><circle cx="370" cy="112" r="14"/><circle cx="478" cy="165" r="7"/>
-      <circle cx="137" cy="48" r="7"/><circle cx="423" cy="34" r="7"/>
-    </g>
-  </svg>;
+export function Card({ title, subtitle, children, extra, className = '' }: { title?: string; subtitle?: string; children: ReactNode; extra?: ReactNode; className?: string }) {
+  return <section className={`card ${className}`}>{(title || extra) && <div className="card-header">{title && <h2>{title}</h2>}{extra}</div>}{subtitle && <p className="card-sub">{subtitle}</p>}{children}</section>;
 }
 
-export function Card({ title, subtitle, children, extra }: { title?: string; subtitle?: string; children: ReactNode; extra?: ReactNode }) {
-  return <section className="card">{(title || extra) && <div className="card-header">{title && <h2>{title}</h2>}{extra}</div>}{subtitle && <p className="card-sub">{subtitle}</p>}{children}</section>;
-}
-
-export function Field({ label, children }: { label: string; children: ReactElement<{ id?: string }> }) {
+export function Field({ label, children, hint, suffix }: { label: string; children: ReactElement<{ id?: string; 'aria-describedby'?: string }>; hint?: string; suffix?: string }) {
   const generatedId = useId();
   const id = children.props.id ?? generatedId;
-  return <div className="field"><label htmlFor={id}>{label}</label>{cloneElement(children,{ id })}</div>;
+  const hintId = hint ? `${id}-hint` : undefined;
+  const control = cloneElement(children, { id, 'aria-describedby': hintId ?? children.props['aria-describedby'] });
+  return <div className="field"><label htmlFor={id}>{label}</label>
+    {suffix ? <div className="field-suffix">{control}<span aria-hidden="true">{suffix}</span></div> : control}
+    {hint && <small className="muted" id={hintId}>{hint}</small>}
+  </div>;
 }
 
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
 }
 
-export function Stat({ icon, label, value, hint }: { icon: IconName; label: string; value: ReactNode; hint?: ReactNode }) {
-  return <div className="stat"><div><div className="stat-icon"><Icon name={icon} size={17} /></div><div className="stat-label">{label}</div><div className="stat-number">{value}</div></div>{hint && <span className="small muted">{hint}</span>}</div>;
+export function Stat({ label, value, hint, tone }: { label: string; value: ReactNode; hint?: ReactNode; tone?: 'error' }) {
+  return <div className="stat" data-tone={tone}><div className="stat-label">{label}</div><div className="stat-number">{value}</div>{hint && <span className="small muted">{hint}</span>}</div>;
 }
 
 const statuses: Record<string, [string, string]> = {
